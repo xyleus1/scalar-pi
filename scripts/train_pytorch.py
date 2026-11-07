@@ -307,6 +307,8 @@ def log_memory_usage(device, step, phase="unknown"):
 
 
 def train_loop(config: _config.TrainConfig):
+    if getattr(config.model, "freeze_vlm", False) or getattr(config.model, "velocity_mode", "direct") != "direct":
+        raise ValueError("Use scripts/train_potential.py for research configs (freezing, accumulation, EMA, metadata).")
     use_ddp, local_rank, device = setup_ddp()
     is_main = (not use_ddp) or (dist.get_rank() == 0)
     set_seed(config.seed, local_rank)

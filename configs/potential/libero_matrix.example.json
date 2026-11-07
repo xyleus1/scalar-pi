@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "diagnostic": false,
+  "training_seeds": [17, 42, 93],
+  "suites": ["libero_spatial", "libero_object", "libero_goal", "libero_10"],
+  "num_steps": [1, 10],
+  "num_tasks_per_suite": 10,
+  "num_trials_per_task": 50,
+  "rollout_seed": 7,
+  "paired_noise_seed": 7,
+  "output_dir": "results/potential",
+  "port": 8000,
+  "save_videos": true,
+  "server_command_prefix": ["uv", "run", "--no-sync", "python", "scripts/serve_policy.py"],
+  "client_command_prefix": ["examples/libero/.venv/bin/python", "examples/libero/main.py"],
+  "notes": "Replace checkpoint_dir placeholders with completed terminal EMA checkpoint directories. Dry-run is the default. This primary matrix has 40000 episodes. Reduced matrices must explicitly set diagnostic=true. --resume-completed-suites skips only complete validated suite logs and rejects partial or invalid logs.",
+  "variants": [
+    {"group": "B0", "training_seed": 17, "checkpoint_id": "B0-seed17", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_B0_SEED17_CHECKPOINT"},
+    {"group": "B0", "training_seed": 42, "checkpoint_id": "B0-seed42", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_B0_SEED42_CHECKPOINT"},
+    {"group": "B0", "training_seed": 93, "checkpoint_id": "B0-seed93", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_B0_SEED93_CHECKPOINT"},
+    {"group": "B1", "training_seed": 17, "checkpoint_id": "B1-seed17", "config": "pi05_libero_b1", "checkpoint_dir": "REPLACE_WITH_B1_SEED17_CHECKPOINT"},
+    {"group": "B1", "training_seed": 42, "checkpoint_id": "B1-seed42", "config": "pi05_libero_b1", "checkpoint_dir": "REPLACE_WITH_B1_SEED42_CHECKPOINT"},
+    {"group": "B1", "training_seed": 93, "checkpoint_id": "B1-seed93", "config": "pi05_libero_b1", "checkpoint_dir": "REPLACE_WITH_B1_SEED93_CHECKPOINT"},
+    {"group": "P", "training_seed": 17, "checkpoint_id": "P-seed17", "config": "pi05_libero_potential", "checkpoint_dir": "REPLACE_WITH_P_SEED17_CHECKPOINT"},
+    {"group": "P", "training_seed": 42, "checkpoint_id": "P-seed42", "config": "pi05_libero_potential", "checkpoint_dir": "REPLACE_WITH_P_SEED42_CHECKPOINT"},
+    {"group": "P", "training_seed": 93, "checkpoint_id": "P-seed93", "config": "pi05_libero_potential", "checkpoint_dir": "REPLACE_WITH_P_SEED93_CHECKPOINT"},
+    {"group": "reference", "training_seed": null, "checkpoint_id": "released-pi05-libero", "reference": true, "config": "pi05_libero", "checkpoint_dir": "gs://openpi-assets/checkpoints/pi05_libero/"}
+  ]
+}

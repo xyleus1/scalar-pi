@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
 import openpi.shared.download as download
+from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
 import openpi.transforms as transforms
@@ -50,9 +51,18 @@ def create_trained_policy(
     is_pytorch = os.path.exists(weight_path)
 
     logging.info("Loading model...")
+    research_metadata = validate_checkpoint_metadata(
+        checkpoint_dir,
+        velocity_mode=getattr(train_config.model, "velocity_mode", "direct"),
+        action_horizon=train_config.model.action_horizon,
+        action_dim=train_config.model.action_dim,
+    )
     if is_pytorch:
         model = train_config.model.load_pytorch(train_config, weight_path)
-        model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
+        if getattr(train_config.model, "freeze_vlm", False):
+            model.configure_expert_only()
+        else:
+            model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
     else:
         model = train_config.model.load(_model.restore_params(checkpoint_dir / "params", dtype=jnp.bfloat16))
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
@@ -88,7 +98,18 @@ def create_trained_policy(
             *repack_transforms.outputs,
         ],
         sample_kwargs=sample_kwargs,
-        metadata=train_config.policy_metadata,
+        metadata={
+            **(train_config.policy_metadata or {}),
+            "config_name": train_config.name,
+            "checkpoint_id": str(checkpoint_dir),
+            "num_steps": (
+                None
+                if train_config.model.model_type == _model.ModelType.PI0_FAST
+                else (sample_kwargs or {}).get("num_steps", 10)
+            ),
+            "velocity_mode": getattr(train_config.model, "velocity_mode", "direct"),
+            "research": research_metadata,
+        },
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
     )

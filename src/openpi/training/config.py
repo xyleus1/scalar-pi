@@ -970,6 +970,32 @@ _CONFIGS = [
     *polaris_config.get_polaris_configs(),
 ]
 
+# Keep all benchmark data, transforms, and optimizer settings inherited from the
+# upstream pi05_libero recipe. Only the declared expert-only intervention differs.
+_libero_reference = next(config for config in _CONFIGS if config.name == "pi05_libero")
+for _name, _mode, _initialization in (
+    ("pi05_libero_b0", "direct", "pretrained_output"),
+    ("pi05_libero_b1", "direct", "zero_output"),
+    ("pi05_libero_potential", "potential_dot", "zero_output"),
+):
+    _CONFIGS.append(
+        dataclasses.replace(
+            _libero_reference,
+            name=_name,
+            model=dataclasses.replace(
+                _libero_reference.model,
+                dtype="float32",
+                velocity_mode=_mode,
+                freeze_vlm=True,
+                initialization=_initialization,
+                pytorch_compile_mode=None,
+            ),
+            pytorch_training_precision="float32",
+            pytorch_weight_path=None,
+            wandb_enabled=False,
+        )
+    )
+
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
     raise ValueError("Config names must be unique.")
 _CONFIGS_DICT = {config.name: config for config in _CONFIGS}

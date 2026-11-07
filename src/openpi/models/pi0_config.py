@@ -1,5 +1,5 @@
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import flax.nnx as nnx
 import jax
@@ -34,7 +34,23 @@ class Pi0Config(_model.BaseModelConfig):
 
     pytorch_compile_mode: str | None = "max-autotune"
 
+    # Explicit research semantics: tensor shapes alone cannot identify a potential policy.
+    velocity_mode: Literal["direct", "potential_dot"] = "direct"
+    freeze_vlm: bool = False
+    initialization: Literal["pretrained_output", "zero_output"] = "pretrained_output"
+
     def __post_init__(self):
+        if self.velocity_mode not in ("direct", "potential_dot"):
+            raise ValueError(f"Unknown velocity mode: {self.velocity_mode}")
+        if self.initialization not in ("pretrained_output", "zero_output"):
+            raise ValueError(f"Unknown output initialization: {self.initialization}")
+        if self.freeze_vlm and (not self.pi05 or self.dtype != "float32"):
+            raise ValueError("Expert-only research models require pi05=True and FP32 construction before loading.")
+        if self.velocity_mode == "potential_dot":
+            if not self.freeze_vlm:
+                raise ValueError("The validated potential implementation requires expert-only adaptation.")
+            if self.pytorch_compile_mode is not None:
+                raise ValueError("Potential sampling requires pytorch_compile_mode=None.")
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
         if self.discrete_state_input is None:
@@ -56,6 +72,8 @@ class Pi0Config(_model.BaseModelConfig):
 
     @override
     def create(self, rng: at.KeyArrayLike) -> "Pi0":
+        if self.velocity_mode != "direct" or self.freeze_vlm:
+            raise ValueError("Research configurations require the PyTorch potential trainer/loader, not JAX.")
         from openpi.models.pi0 import Pi0
 
         return Pi0(self, rngs=nnx.Rngs(rng))

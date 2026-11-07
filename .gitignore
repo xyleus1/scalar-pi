@@ -130,6 +130,9 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-cpu/
+research_outputs/
+.pytest-evaluation-tmp-*/
 env/
 venv/
 ENV/

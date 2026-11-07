@@ -58,6 +58,9 @@ class Policy(BasePolicy):
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
             self._model.eval()
+            # Serving needs action-input derivatives for potential policies, but
+            # never parameter gradients. Local enable_grad still supports dPsi/dx.
+            self._model.requires_grad_(requires_grad=False)
             self._sample_actions = model.sample_actions
         else:
             # JAX model setup
@@ -66,8 +69,19 @@ class Policy(BasePolicy):
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+        total_start = time.monotonic()
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
+        noise_seed = inputs.pop("noise_seed", None)
+        if noise_seed is not None:
+            if noise is not None:
+                raise ValueError("Supply either noise or noise_seed, not both.")
+            if (
+                isinstance(noise_seed, bool)
+                or not isinstance(noise_seed, int | np.integer)
+                or not 0 <= int(noise_seed) < 2**32
+            ):
+                raise ValueError("noise_seed must be an unsigned 32-bit integer.")
         inputs = self._input_transform(inputs)
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
@@ -80,6 +94,15 @@ class Policy(BasePolicy):
 
         # Prepare kwargs for sample_actions
         sample_kwargs = dict(self._sample_kwargs)
+        if noise_seed is not None:
+            if self._is_pytorch_model:
+                generator = torch.Generator(device=self._pytorch_device).manual_seed(int(noise_seed))
+                shape = (1, self._model.config.action_horizon, self._model.config.action_dim)
+                sample_kwargs["noise"] = torch.randn(
+                    shape, generator=generator, device=self._pytorch_device, dtype=torch.float32
+                )
+            else:
+                sample_rng_or_pytorch_device = jax.random.key(int(noise_seed))
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 
@@ -88,11 +111,23 @@ class Policy(BasePolicy):
             sample_kwargs["noise"] = noise
 
         observation = _model.Observation.from_dict(inputs)
+        cuda_timing = self._is_pytorch_model and torch.device(self._pytorch_device).type == "cuda"
+        if cuda_timing:
+            torch.cuda.synchronize(self._pytorch_device)
+            cuda_start = torch.cuda.Event(enable_timing=True)
+            cuda_end = torch.cuda.Event(enable_timing=True)
+            cuda_stream = torch.cuda.current_stream(torch.device(self._pytorch_device))
+            cuda_start.record(cuda_stream)
         start_time = time.monotonic()
         outputs = {
             "state": inputs["state"],
             "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
         }
+        if cuda_timing:
+            cuda_end.record(cuda_stream)
+            cuda_end.synchronize()
+        elif not self._is_pytorch_model:
+            jax.block_until_ready(outputs["actions"])
         model_time = time.monotonic() - start_time
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
@@ -102,7 +137,10 @@ class Policy(BasePolicy):
         outputs = self._output_transform(outputs)
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
+            "total_ms": (time.monotonic() - total_start) * 1000,
         }
+        if cuda_timing:
+            outputs["policy_timing"]["cuda_ms"] = cuda_start.elapsed_time(cuda_end)
         return outputs
 
     @property

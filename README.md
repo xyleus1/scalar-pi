@@ -1,4 +1,12 @@
-# openpi
+# scalar-pi
+
+Scalar-pi studies a scalar-potential pi0.5 action expert with matched direct-field controls, built on [Physical Intelligence's OpenPI](https://github.com/Physical-Intelligence/openpi).
+
+See the [architecture, experiment protocol, and runbook](docs/potential_pi05.md) for setup, data verification, training, GPU qualification, and paired LIBERO evaluation. **Status:** 121 CPU tests passed; full-size GPU training and real LIBERO evaluation have not yet been run.
+
+The original OpenPI and model license files are retained. The documentation below is inherited from OpenPI.
+
+## Upstream OpenPI documentation
 
 openpi holds open-source models and packages for robotics, published by the [Physical Intelligence team](https://www.physicalintelligence.company/).
 

@@ -26,6 +26,8 @@ Example:
     python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid --output_path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid_pytorch
 """
 
+import dataclasses
+import hashlib
 import json
 import os
 import pathlib
@@ -290,7 +292,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
     llm_mlp_linear = state_dict.pop(f"llm/layers/mlp_{num_expert}/linear{suffix}")
 
     # Check if we have Dense layers (for pi05/adaptive normalization) or scale layers (for regular pi0)
-    if "pi05" in checkpoint_dir:
+    if pi05:
         # Pi05 with adaptive normalization
         llm_input_layernorm_bias = state_dict.pop(f"llm/layers/pre_attention_norm_{num_expert}/Dense_0/bias{suffix}")
         llm_post_attention_layernorm_bias = state_dict.pop(f"llm/layers/pre_ffw_norm_{num_expert}/Dense_0/bias{suffix}")
@@ -345,7 +347,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
             i
         ].transpose()
 
-        if "pi05" in checkpoint_dir:
+        if pi05:
             # Pi05 with adaptive normalization - use Dense layer parameters directly
             state_dict[f"paligemma_with_expert.gemma_expert.model.layers.{i}.input_layernorm.dense.bias"] = (
                 llm_input_layernorm_bias[i]
@@ -369,7 +371,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
             )
 
     # Handle final norm layer
-    if "pi05" in checkpoint_dir:
+    if pi05:
         # Pi05 with adaptive normalization - use Dense layer parameters directly
         final_norm_bias = state_dict.pop(f"llm/final_norm_{num_expert}/Dense_0/bias{suffix}")
         final_norm_kernel = state_dict.pop(f"llm/final_norm_{num_expert}/Dense_0/kernel{suffix}")
@@ -511,13 +513,27 @@ def convert_pi0_checkpoint(
     )
 
     # Instantiate model
-    pi0_model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(model_config)
+    # Construct in FP32 before loading. Loading into BF16 and then converting to
+    # FP32 would permanently round pretrained weights used by potential training.
+    construction_config = dataclasses.replace(model_config, dtype="float32", pytorch_compile_mode=None)
+    pi0_model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(construction_config)
 
     # Combine all parameters (no prefix needed for our model structure)
     all_params = {**paligemma_params, **gemma_params, **projection_params}
 
+    # The JAX embedder is tied to PaliGemma's language output projection.
+    # load_state_dict still expects both names even when they share storage.
+    all_params["paligemma_with_expert.paligemma.lm_head.weight"] = all_params[
+        "paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
+    ]
+
     # Load state dict
-    pi0_model.load_state_dict(all_params, strict=False)
+    incompatible = pi0_model.load_state_dict(all_params, strict=False)
+    # The continuous-action path never uses this retained vocabulary projection.
+    allowed_missing = {"paligemma_with_expert.gemma_expert.lm_head.weight"}
+    missing = set(incompatible.missing_keys) - allowed_missing
+    if missing or incompatible.unexpected_keys:
+        raise ValueError(f"Incomplete conversion: missing={sorted(missing)}, unexpected={incompatible.unexpected_keys}")
 
     if precision == "float32":
         pi0_model = pi0_model.to(torch.float32)
@@ -533,7 +549,7 @@ def convert_pi0_checkpoint(
     safetensors.torch.save_model(pi0_model, os.path.join(output_path, "model.safetensors"))
 
     # Copy assets folder if it exists
-    assets_source = pathlib.Path(checkpoint_dir).parent / "assets"
+    assets_source = pathlib.Path(checkpoint_dir) / "assets"
     if assets_source.exists():
         assets_dest = pathlib.Path(output_path) / "assets"
         if assets_dest.exists():
@@ -547,7 +563,19 @@ def convert_pi0_checkpoint(
         "paligemma_variant": model_config.paligemma_variant,
         "action_expert_variant": model_config.action_expert_variant,
         "precision": precision,
+        "velocity_mode": "direct",
+        "conversion_missing_unused_keys": incompatible.missing_keys,
+        "source_checkpoint": str(pathlib.Path(checkpoint_dir).resolve()),
+        "source_files_sha256": {},
     }
+    source_root = pathlib.Path(checkpoint_dir).resolve()
+    for path in sorted(source_root.rglob("*")):
+        if path.is_file():
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+                    digest.update(block)
+            config_dict["source_files_sha256"][path.relative_to(source_root).as_posix()] = digest.hexdigest()
     with open(os.path.join(output_path, "config.json"), "w") as f:
         json.dump(config_dict, f, indent=2)
 
@@ -574,6 +602,8 @@ def main(
     model_config = _config.get_config(config_name).model
     if not isinstance(model_config, openpi.models.pi0_config.Pi0Config):
         raise ValueError(f"Config {config_name} is not a Pi0Config")
+    if model_config.velocity_mode != "direct" or model_config.freeze_vlm:
+        raise ValueError("Convert using the original pi05_libero config; apply research mode only during training.")
     if inspect_only:
         load_jax_model_and_print_keys(checkpoint_dir)
     else:

@@ -241,6 +241,18 @@ class BaseModelConfig(abc.ABC):
         return nnx.merge(graphdef, state)
 
     def load_pytorch(self, train_config, weight_path: str):
+        from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
+
+        metadata = validate_checkpoint_metadata(
+            weight_path,
+            velocity_mode=getattr(train_config.model, "velocity_mode", "direct"),
+            action_horizon=train_config.model.action_horizon,
+            action_dim=train_config.model.action_dim,
+        )
+        if metadata is not None and metadata.get("trainer") == "potential_pi" and not train_config.model.freeze_vlm:
+            raise ValueError("Research checkpoints require their matching expert-only model configuration.")
+        if metadata is not None and metadata.get("initialization") != train_config.model.initialization:
+            raise ValueError("Checkpoint initialization does not match the requested research control group.")
         logger.info(f"train_config: {train_config}")
         model = pi0_pytorch.PI0Pytorch(config=train_config.model)
         safetensors.torch.load_model(model, weight_path)

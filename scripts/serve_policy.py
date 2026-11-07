@@ -50,6 +50,9 @@ class Args:
     port: int = 8000
     # Record the policy's behavior for debugging.
     record: bool = False
+    # Keep the solver count explicit and visible to paired evaluation clients.
+    num_steps: int = 10
+    checkpoint_id: str | None = None
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -76,24 +79,45 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
 }
 
 
-def create_default_policy(env: EnvMode, *, default_prompt: str | None = None) -> _policy.Policy:
+def _sample_kwargs(config: _config.TrainConfig, num_steps: int) -> dict:
+    if config.model.model_type == _config.ModelType.PI0_FAST:
+        if num_steps != 10:
+            raise ValueError("--num-steps controls flow integration and does not apply to pi0-FAST.")
+        return {}
+    return {"num_steps": num_steps}
+
+
+def create_default_policy(env: EnvMode, *, default_prompt: str | None = None, num_steps: int = 10) -> _policy.Policy:
     """Create a default policy for the given environment."""
     if checkpoint := DEFAULT_CHECKPOINT.get(env):
+        config = _config.get_config(checkpoint.config)
         return _policy_config.create_trained_policy(
-            _config.get_config(checkpoint.config), checkpoint.dir, default_prompt=default_prompt
+            config,
+            checkpoint.dir,
+            default_prompt=default_prompt,
+            sample_kwargs=_sample_kwargs(config, num_steps),
         )
     raise ValueError(f"Unsupported environment mode: {env}")
 
 
 def create_policy(args: Args) -> _policy.Policy:
     """Create a policy from the given arguments."""
+    if args.num_steps < 1:
+        raise ValueError("num_steps must be positive")
     match args.policy:
         case Checkpoint():
-            return _policy_config.create_trained_policy(
-                _config.get_config(args.policy.config), args.policy.dir, default_prompt=args.default_prompt
+            config = _config.get_config(args.policy.config)
+            policy = _policy_config.create_trained_policy(
+                config,
+                args.policy.dir,
+                default_prompt=args.default_prompt,
+                sample_kwargs=_sample_kwargs(config, args.num_steps),
             )
         case Default():
-            return create_default_policy(args.env, default_prompt=args.default_prompt)
+            policy = create_default_policy(args.env, default_prompt=args.default_prompt, num_steps=args.num_steps)
+    if args.checkpoint_id is not None:
+        policy.metadata["checkpoint_id"] = args.checkpoint_id
+    return policy
 
 
 def main(args: Args) -> None:

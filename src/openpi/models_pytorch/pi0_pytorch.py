@@ -1,5 +1,7 @@
+import dataclasses
 import logging
 import math
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -8,7 +10,18 @@ import torch.nn.functional as F  # noqa: N812
 
 import openpi.models.gemma as _gemma
 from openpi.models_pytorch.gemma_pytorch import PaliGemmaWithExpertModel
+from openpi.models_pytorch.potential import dot_potential
+from openpi.models_pytorch.potential import potential_velocity
 import openpi.models_pytorch.preprocessing_pytorch as _preprocessing
+
+
+@dataclasses.dataclass(frozen=True)
+class ActionContext:
+    """Observation-only conditioning; never append suffix tokens to this cache."""
+
+    state: Tensor
+    prefix_pad_masks: Tensor
+    past_key_values: Any
 
 
 def get_safe_dtype(target_dtype, device_type):
@@ -86,6 +99,8 @@ class PI0Pytorch(nn.Module):
         super().__init__()
         self.config = config
         self.pi05 = config.pi05
+        self.velocity_mode = getattr(config, "velocity_mode", "direct")
+        self.freeze_vlm = getattr(config, "freeze_vlm", False)
 
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
@@ -124,9 +139,68 @@ class PI0Pytorch(nn.Module):
         except ImportError:
             raise ValueError(msg) from None
 
+        if self.freeze_vlm:
+            self.requires_grad_(requires_grad=False)
+            self.expert_modules().requires_grad_(requires_grad=True)
+            self.paligemma_with_expert.paligemma.eval()
+
+    def expert_modules(self) -> nn.ModuleDict:
+        """References to active trainable modules, excluding the unused vocabulary head."""
+        if not self.pi05:
+            raise ValueError("Expert-only research is implemented for pi05.")
+        return nn.ModuleDict(
+            {
+                "expert": self.paligemma_with_expert.gemma_expert.model,
+                "action_in_proj": self.action_in_proj,
+                "action_out_proj": self.action_out_proj,
+                "time_mlp_in": self.time_mlp_in,
+                "time_mlp_out": self.time_mlp_out,
+            }
+        )
+
+    def configure_expert_only(self, vlm_dtype: torch.dtype = torch.bfloat16) -> None:
+        """Call AFTER loading FP32 weights, so casting cannot round the expert weights."""
+        if not self.freeze_vlm:
+            raise ValueError("configure_expert_only requires model.freeze_vlm=True.")
+        if vlm_dtype not in (torch.float32, torch.bfloat16):
+            raise ValueError("The frozen VLM must use float32 or bfloat16.")
+        self.requires_grad_(requires_grad=False)
+        self.expert_modules().to(dtype=torch.float32).requires_grad_(requires_grad=True)
+        keep_fp32 = (
+            "embeddings.patch_embedding",
+            "embeddings.position_embedding",
+            "input_layernorm",
+            "post_attention_layernorm",
+            "model.norm",
+        )
+        for name, parameter in self.paligemma_with_expert.paligemma.named_parameters():
+            dtype = torch.float32 if any(part in name for part in keep_fp32) else vlm_dtype
+            parameter.data = parameter.data.to(dtype=dtype)
+        self.paligemma_with_expert.paligemma.eval()
+        # Native HF checkpointing may strip past_key_value. Research checkpointing
+        # instead wraps the whole immutable-cache suffix call non-reentrantly.
+        self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = False
+        self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = False
+        self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = False
+
+    def zero_action_output(self) -> None:
+        """Reset only the output projection, once on fresh B1/P initialization."""
+        nn.init.zeros_(self.action_out_proj.weight)
+        if self.action_out_proj.bias is not None:
+            nn.init.zeros_(self.action_out_proj.bias)
+
+    def train(self, mode: bool = True):  # noqa: FBT001, FBT002 - nn.Module API
+        super().train(mode)
+        if self.freeze_vlm:
+            self.paligemma_with_expert.paligemma.eval()
+        return self
+
     def gradient_checkpointing_enable(self):
         """Enable gradient checkpointing for memory optimization."""
         self.gradient_checkpointing_enabled = True
+        if self.freeze_vlm:
+            # Keep HF flags disabled: they can drop the observation cache.
+            return
         self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = True
         self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = True
         self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = True
@@ -148,7 +222,7 @@ class PI0Pytorch(nn.Module):
 
     def _apply_checkpoint(self, func, *args, **kwargs):
         """Helper method to apply gradient checkpointing if enabled."""
-        if self.gradient_checkpointing_enabled and self.training:
+        if self.gradient_checkpointing_enabled and self.training and torch.is_grad_enabled():
             return torch.utils.checkpoint.checkpoint(
                 func, *args, use_reentrant=False, preserve_rng_state=False, **kwargs
             )
@@ -316,6 +390,8 @@ class PI0Pytorch(nn.Module):
 
     def forward(self, observation, actions, noise=None, time=None) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        if self.freeze_vlm:
+            return self._expert_only_loss(observation, actions, noise=noise, time=time)
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
 
         if noise is None:
@@ -373,9 +449,65 @@ class PI0Pytorch(nn.Module):
 
         return F.mse_loss(u_t, v_t, reduction="none")
 
+    def encode_context(self, observation, *, train: bool = False) -> ActionContext:
+        """Use the original prefix path; the research VLM is frozen and independent of actions."""
+        with torch.no_grad():
+            images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=train)
+            prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+                images, img_masks, lang_tokens, lang_masks
+            )
+            masks = self._prepare_attention_masks_4d(make_att_2d_masks(prefix_pad_masks, prefix_att_masks))
+            positions = torch.cumsum(prefix_pad_masks, dim=1) - 1
+            self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
+            _, cache = self.paligemma_with_expert.forward(
+                attention_mask=masks,
+                position_ids=positions,
+                inputs_embeds=[prefix_embs, None],
+                past_key_values=None,
+                use_cache=True,
+            )
+        if cache is None:
+            raise RuntimeError("The observation cache was lost; disable native Hugging Face gradient checkpointing.")
+        return ActionContext(state, prefix_pad_masks, cache)
+
+    def compute_potential(self, x, time, context: ActionContext) -> Tensor:
+        raw = self.predict_raw_field(context.state, context.prefix_pad_masks, context.past_key_values, x, time)
+        return dot_potential(x, raw)
+
+    def predict_velocity(self, x, time, context: ActionContext, *, create_graph: bool = False) -> Tensor:
+        """Preserves the caller's action leaf for higher derivative diagnostics."""
+
+        def raw_field(value):
+            return self.predict_raw_field(context.state, context.prefix_pad_masks, context.past_key_values, value, time)
+
+        if self.velocity_mode == "direct":
+            return raw_field(x)
+        return potential_velocity(raw_field, x, create_graph=create_graph)
+
+    def _expert_only_loss(self, observation, actions, *, noise=None, time=None) -> Tensor:
+        if torch.is_inference_mode_enabled():
+            raise RuntimeError("Potential/expert-only loss requires autograd; do not use torch.inference_mode().")
+        context = self.encode_context(observation, train=self.training)
+        noise = self.sample_noise(actions.shape, actions.device) if noise is None else noise
+        time = self.sample_time(actions.shape[0], actions.device) if time is None else time
+        x = time[:, None, None] * noise + (1 - time[:, None, None]) * actions
+        target = noise - actions
+        if self.velocity_mode == "direct":
+            velocity = self.predict_velocity(x, time, context)
+        else:
+            create_graph = torch.is_grad_enabled() and self.training
+            with torch.enable_grad():
+                x_leaf = x.detach().requires_grad_(requires_grad=True)
+                velocity = self.predict_velocity(x_leaf, time, context, create_graph=create_graph)
+        return F.mse_loss(velocity, target, reduction="none")
+
     @torch.no_grad()
     def sample_actions(self, device, observation, noise=None, num_steps=10) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
+        if not isinstance(num_steps, int) or isinstance(num_steps, bool) or num_steps < 1:
+            raise ValueError("num_steps must be a positive integer.")
+        if self.velocity_mode == "potential_dot" and torch.is_inference_mode_enabled():
+            raise RuntimeError("Potential sampling needs input gradients; use no_grad, not inference_mode.")
         bsize = observation.state.shape[0]
         if noise is None:
             actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
@@ -428,6 +560,15 @@ class PI0Pytorch(nn.Module):
         timestep,
     ):
         """Apply one denoising step of the noise `x_t` at a given timestep."""
+        context = ActionContext(state, prefix_pad_masks, past_key_values)
+        if self.velocity_mode == "direct":
+            return self.predict_velocity(x_t, timestep, context)
+        with torch.enable_grad():
+            leaf = x_t.detach().requires_grad_(requires_grad=True)
+            return self.predict_velocity(leaf, timestep, context, create_graph=False).detach()
+
+    def predict_raw_field(self, state, prefix_pad_masks, past_key_values, x_t, timestep):
+        """The original cached expert output, before potential contraction."""
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, timestep)
 
         suffix_len = suffix_pad_masks.shape[1]
@@ -447,16 +588,18 @@ class PI0Pytorch(nn.Module):
         full_att_2d_masks_4d = self._prepare_attention_masks_4d(full_att_2d_masks)
         self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = "eager"  # noqa: SLF001
 
-        outputs_embeds, _ = self.paligemma_with_expert.forward(
-            attention_mask=full_att_2d_masks_4d,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=[None, suffix_embs],
-            use_cache=False,
-            adarms_cond=[None, adarms_cond],
-        )
+        def suffix_forward(embeddings, condition):
+            outputs_embeds, _ = self.paligemma_with_expert.forward(
+                attention_mask=full_att_2d_masks_4d,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=[None, embeddings],
+                use_cache=False,
+                adarms_cond=[None, condition],
+            )
+            return outputs_embeds[1]
 
-        suffix_out = outputs_embeds[1]
+        suffix_out = self._apply_checkpoint(suffix_forward, suffix_embs, adarms_cond)
         suffix_out = suffix_out[:, -self.config.action_horizon :]
         suffix_out = suffix_out.to(dtype=torch.float32)
         return self.action_out_proj(suffix_out)
