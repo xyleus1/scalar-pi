@@ -70,6 +70,19 @@ class FakeLambda:
         raise AssertionError((method, endpoint))
 
 
+def test_api_requests_identify_the_controller(cloud, monkeypatch):
+    requests = []
+
+    def open_request(request, **_kwargs):
+        requests.append(request)
+        return io.BytesIO(b'{"data": []}')
+
+    monkeypatch.setattr(cloud.urllib.request, "build_opener", lambda *_args: SimpleNamespace(open=open_request))
+    assert cloud.LambdaClient("fixture-secret").request("GET", "instances") == []
+    assert requests[0].get_header("User-agent") == "scalar-pi/1.0 (+https://github.com/xyleus1/scalar-pi)"
+    assert requests[0].get_header("Accept") == "application/json"
+
+
 def test_dry_run_does_not_load_credentials_or_create_state(cloud, config, tmp_path, monkeypatch, capsys):
     path = tmp_path / "lambda.json"
     path.write_text(json.dumps(config))
@@ -318,6 +331,79 @@ def test_forecast_price_and_storage_are_reserved_without_double_counting(cloud, 
     report["remaining_noncompute_cost_usd"] = 501
     with pytest.raises(ValueError, match="remaining balance"):
         cloud.check_allowance(config, {"runs": []}, 4, 3.29, "research", report)
+
+
+@pytest.fixture
+def canary_config(config):
+    return {
+        **config,
+        "credits_verified": False,
+        "forecast_hourly_rate_usd": 3.79,
+        "canary_allowance_usd": 2,
+        "canary_noncompute_reserve_usd": 0.75,
+    }
+
+
+def test_unverified_canary_has_cumulative_cost_and_reserve_limit(cloud, canary_config):
+    allowance = cloud.check_allowance(canary_config, {"runs": []}, 0.25, 3.29, "canary")
+    assert allowance["canary_with_reserve_usd"] == pytest.approx(1.887)
+    assert canary_config["credits_verified"] is False
+    state = {"runs": [{"started_unix": 0, "ended_unix": 900, "hourly_rate_usd": 3.29, "stage": "canary"}]}
+    with pytest.raises(ValueError, match="Cumulative canary"):
+        cloud.check_allowance(canary_config, state, 0.25, 3.29, "canary")
+    canary_config["noncompute_spent_usd"] = 0.20
+    with pytest.raises(ValueError, match="Cumulative canary"):
+        cloud.check_allowance(canary_config, {"runs": []}, 0.25, 3.29, "canary")
+
+
+@pytest.mark.parametrize("stage", ["qualification", "research"])
+def test_canary_exception_does_not_authorize_training(cloud, canary_config, tmp_path, stage):
+    client = FakeLambda(canary_config)
+    args = SimpleNamespace(stage=stage)
+    with pytest.raises(ValueError, match="canary-only"):
+        cloud.run_session(client, canary_config, {"runs": []}, tmp_path / "state.json", args)
+    assert client.calls == []
+
+
+def test_canary_exception_rejects_arbitrary_worker_script(cloud, canary_config, tmp_path):
+    client = FakeLambda(canary_config)
+    args = SimpleNamespace(stage="canary", script=ROOT / "scripts/lambda/train.sh")
+    with pytest.raises(ValueError, match="canonical"):
+        cloud.run_session(client, canary_config, {"runs": []}, tmp_path / "state.json", args)
+    assert client.calls == []
+    canary_config["canary_allowance_usd"] = 2.01
+    with pytest.raises(ValueError, match=r"exceed \$2"):
+        cloud.validate_config(canary_config)
+
+
+def test_unverified_prepare_checks_canary_budget_before_resource_creation(cloud, canary_config, tmp_path):
+    canary_config["canary_allowance_usd"] = 1
+    client = FakeLambda(canary_config)
+    with pytest.raises(ValueError, match="Cumulative canary"):
+        cloud.prepare(client, canary_config, {"resources": {}, "runs": []}, tmp_path / "state.json")
+    assert not Path(canary_config["ssh_key_path"]).exists()
+    assert [method for method, _, _ in client.calls] == ["GET"]
+
+
+def test_approved_canary_launches_and_terminates_without_claiming_verified_billing(
+    cloud, canary_config, tmp_path, monkeypatch
+):
+    client = FakeLambda(canary_config)
+    state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
+    args = SimpleNamespace(
+        max_hours=0.25,
+        stage="canary",
+        budget_report=None,
+        commit="a" * 40,
+        script=ROOT / "scripts/lambda/canary.sh",
+    )
+    monkeypatch.setattr(cloud.subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(cloud.subprocess, "Popen", lambda *_a, **_k: (_ for _ in ()).throw(OSError("fixture")))
+    with pytest.raises(OSError, match="fixture"):
+        cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
+    assert client.status == "terminated"
+    assert state["runs"][0]["allowance"]["canary_allowance_usd"] == 2
+    assert canary_config["credits_verified"] is False
 
 
 def test_research_scope_is_locked_before_results(cloud):

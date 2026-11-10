@@ -56,7 +56,12 @@ class LambdaClient:
             API + endpoint,
             data=None if body is None else json.dumps(body).encode(),
             method=method,
-            headers={"Authorization": "Bearer " + self.key, "Content-Type": "application/json"},
+            headers={
+                "Authorization": "Bearer " + self.key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "scalar-pi/1.0 (+https://github.com/xyleus1/scalar-pi)",
+            },
         )
         try:
             with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
@@ -128,6 +133,24 @@ def validate_config(config):
     finite_positive(forecast_rate, "forecast_hourly_rate_usd")
     if forecast_rate < config["max_hourly_rate_usd"]:
         raise ValueError("Forecast rate must cover the maximum permitted live rate")
+    if "canary_allowance_usd" in config or "canary_noncompute_reserve_usd" in config:
+        canary_allowance(config)
+
+
+def canary_allowance(config):
+    allowance = finite_positive(config.get("canary_allowance_usd", 0), "canary_allowance_usd")
+    if allowance > 2:
+        raise ValueError("The unverified-billing canary allowance cannot exceed $2")
+    reserve = finite_positive(config.get("canary_noncompute_reserve_usd"), "canary_noncompute_reserve_usd", zero=True)
+    return allowance, reserve
+
+
+def require_billing(config, stage):
+    if config.get("credits_verified") is True:
+        return
+    if stage != "canary":
+        raise ValueError("Credits must be verified before qualification or research; the exception is canary-only")
+    canary_allowance(config)
 
 
 def session_deadline(config, stage, hours, started):
@@ -154,11 +177,22 @@ def session_cost(run, now=None):
 
 
 def check_allowance(config, state, hours, rate, stage, budget_report=None):
+    require_billing(config, stage)
     finite_positive(hours, "max_hours")
     finite_positive(rate, "hourly_rate")
     forecast_rate = finite_positive(config.get("forecast_hourly_rate_usd", rate), "forecast_hourly_rate_usd")
     if forecast_rate < rate:
         raise ValueError("Live price exceeds the forecast rate; regenerate the budget")
+    canary_cost = {}
+    if stage == "canary" and "canary_allowance_usd" in config:
+        allowance, canary_reserve = canary_allowance(config)
+        if hours > 0.25:
+            raise ValueError("The approved canary is limited to 15 minutes")
+        canary_spent = sum(session_cost(run) for run in state["runs"] if run["stage"] == "canary")
+        canary_forecast = canary_spent + config["noncompute_spent_usd"] + canary_reserve + 1.2 * hours * forecast_rate
+        if canary_forecast > allowance:
+            raise ValueError("Cumulative canary cost plus reserve exceeds the approved canary allowance")
+        canary_cost = {"canary_allowance_usd": allowance, "canary_with_reserve_usd": canary_forecast}
     spent = sum(session_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
     reserve = config["noncompute_reserve_usd"]
     if budget_report:
@@ -195,6 +229,7 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
         "forecast_hourly_rate_usd": forecast_rate,
         "remaining_noncompute_reserve_usd": reserve,
         "with_reserve_usd": forecast,
+        **canary_cost,
     }
 
 
@@ -232,9 +267,12 @@ def select_type(client, config):
 
 
 def prepare(client, config, state, state_path):
+    require_billing(config, "canary")
+    rate = select_type(client, config)
     if config.get("credits_verified") is not True:
-        raise ValueError("Verify credit eligibility/expiry and storage pricing before setting credits_verified")
-    select_type(client, config)
+        # The exception covers only storage/key preparation and one bounded
+        # infrastructure probe. It never changes the billing-verification flag.
+        check_allowance(config, state, 0.25, rate, "canary")
     spent = sum(session_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
     if spent + config["noncompute_reserve_usd"] >= config["budget_usd"]:
         raise ValueError("No remaining budget for persistent storage")
@@ -353,8 +391,9 @@ def remote_script(commit, script, *, with_submodules=True):
 
 
 def run_session(client, config, state, state_path, args):
-    if config.get("credits_verified") is not True:
-        raise ValueError("Credits must be verified before launch")
+    require_billing(config, args.stage)
+    if args.stage == "canary" and args.script.resolve() != Path(__file__).with_name("canary.sh").resolve():
+        raise ValueError("Canary sessions must use the canonical scripts/lambda/canary.sh")
     if state.get("pending_launch") or any(not run.get("ended_unix") for run in state["runs"]):
         raise ValueError("A recorded session is still open; reconcile/terminate it first")
     if not {"ssh_key_id", "filesystem_id"}.issubset(state["resources"]):

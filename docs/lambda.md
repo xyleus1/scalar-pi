@@ -43,6 +43,13 @@ remaining storage/tax reserve in the private settings, then set
 Recheck `operator_cidr` if your public IP changes. The image is pinned by ID and
 checked against Lambda's current regional catalog at launch.
 
+An explicitly approved infrastructure-only exception can instead set private
+`canary_allowance_usd` (at most $2) and `canary_noncompute_reserve_usd`. This keeps
+`credits_verified=false`, permits only preparation and the canonical 15-minute
+canary, and checks cumulative canary spending plus the reserve before admission.
+Qualification and research remain blocked until billing is verified. The current
+approved exception uses a $2 allowance and a $0.75 noncompute reserve.
+
 From the repository in PowerShell:
 
 ```powershell
