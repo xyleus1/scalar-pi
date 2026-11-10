@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time as walltime
 import traceback
 
 
@@ -22,6 +23,13 @@ def parse_args(argv=None):
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--checkpoint-kind", choices=("base", "research"), default="base")
     parser.add_argument("--config", default="pi05_libero_potential")
+    parser.add_argument(
+        "--math-only", action="store_true", help="Early synthetic derivative gate; no data/tokenizer needed"
+    )
+    parser.add_argument("--serving-only", action="store_true", help="Reload and serve a produced research checkpoint")
+    parser.add_argument(
+        "--parity-report", type=Path, help="Passing base JAX/Torch conversion report for full qualification"
+    )
     parser.add_argument("--corpus", type=Path, help="Audited real-observation NPZ; required for CUDA qualification")
     parser.add_argument("--norm-stats", type=Path, help="Staged LIBERO norms for base-checkpoint serving qualification")
     parser.add_argument("--report", type=Path, default=Path("data/gpu_qualification.json"))
@@ -35,6 +43,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.batch_size < 1 or args.warmup < 1 or args.repeats < 2:
         parser.error("batch-size and warmup must be positive; repeats must be at least two")
+    if args.serving_only and (args.math_only or args.checkpoint_kind != "research" or args.corpus is None):
+        parser.error("--serving-only requires a research checkpoint and --corpus, without --math-only")
     if not (args.checkpoint / "model.safetensors").is_file():
         parser.error("--checkpoint must contain model.safetensors")
     if args.report.exists():
@@ -70,9 +80,13 @@ def _qualify(args, report):
 
     if not torch.cuda.is_available():
         raise RuntimeError("Full-size qualification requires CUDA; CPU fixtures are separate tests.")
-    if args.corpus is None or not args.corpus.is_file():
+    if not args.math_only and (args.corpus is None or not args.corpus.is_file()):
         raise ValueError("--corpus must identify the audited observation NPZ for actual-policy checks")
-    if args.checkpoint_kind == "base" and (args.norm_stats is None or not args.norm_stats.is_file()):
+    if (
+        not args.math_only
+        and args.checkpoint_kind == "base"
+        and (args.norm_stats is None or not args.norm_stats.is_file())
+    ):
         raise ValueError("Base qualification requires the staged LIBERO --norm-stats asset")
     if args.checkpoint_kind == "research" and args.norm_stats is not None:
         raise ValueError("Research serving must use normalization assets inside its checkpoint")
@@ -83,12 +97,15 @@ def _qualify(args, report):
 
     from openpi.models import model as model_api
     from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
+    from openpi.research.evaluation import file_digest
     from openpi.research.policy_checks import require_staged_tokenizer
+    from openpi.research.qualification import execution_identity
     from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
     from openpi.training import config as configs
     from openpi.training.potential import validate_base_conversion
 
-    require_staged_tokenizer()
+    if not args.math_only:
+        require_staged_tokenizer()
 
     config = configs.get_config(args.config)
     if not config.model.pi05 or not config.model.freeze_vlm or config.model.velocity_mode != "potential_dot":
@@ -104,6 +121,27 @@ def _qualify(args, report):
     if args.checkpoint_kind == "base" and source_metadata and source_metadata.get("trainer") == "potential_pi":
         raise ValueError("Base qualification must start from converted pi05_base, not a research checkpoint")
     weight_file = args.checkpoint / "model.safetensors"
+    report["identity"] = (
+        execution_identity(checkpoint=args.checkpoint)
+        if args.checkpoint_kind == "base"
+        else execution_identity(
+            base_hash=source_metadata["base_checkpoint_hash"],
+            conversion_hash=source_metadata["base_conversion_receipt_sha256"],
+        )
+    )
+    if not args.math_only and args.checkpoint_kind == "base":
+        if args.parity_report is None:
+            raise ValueError("Full base qualification requires --parity-report")
+        parity = json.loads(args.parity_report.read_text())
+        if (
+            parity.get("passed") is not True
+            or parity.get("purpose") != "direct_model_conversion_and_cache_parity"
+            or parity.get("torch", {}).get("checkpoint_sha256") != report["identity"]["base_checkpoint_sha256"]
+            or parity.get("torch", {}).get("corpus_sha256") != file_digest(args.corpus)
+            or parity.get("torch", {}).get("normalization_sha256") != file_digest(args.norm_stats)
+        ):
+            raise ValueError("Conversion parity receipt differs from current base/corpus/normalization")
+        report["conversion_parity"] = {"passed": True, "report_sha256": file_digest(args.parity_report)}
     if args.checkpoint_kind == "base":
         validate_base_conversion(args.checkpoint, require_receipt=True)
         with safe_open(weight_file, framework="pt", device="cpu") as weights:
@@ -163,10 +201,14 @@ def _qualify(args, report):
 
     vlm_digest = _parameter_digest(model.paligemma_with_expert.paligemma)
     model.train()
+    torch.cuda.synchronize(device)
+    backward_start = walltime.perf_counter()
     loss = model(observation, actions, noise=noise, time=time).mean()
     if not torch.isfinite(loss):
         raise RuntimeError("Full-size potential loss is non-finite")
     loss.backward()
+    torch.cuda.synchronize(device)
+    report["probe_backward_seconds"] = walltime.perf_counter() - backward_start
     gradients = list(model.expert_modules().named_parameters())
     missing = [name for name, parameter in gradients if parameter.grad is None]
     nonfinite = [
@@ -255,6 +297,8 @@ def _qualify(args, report):
         raise RuntimeError("Frozen VLM weights changed during derivative qualification")
     report["checks"]["frozen_vlm_weights_unchanged"] = True
     del head_weight, head_bias, context
+    if args.math_only:
+        return
 
     memory = {}
     for steps in (1, 10):
@@ -349,6 +393,8 @@ def _qualify_policy(args, report):
         "num_steps": serving,
         "scope": "direct base bridge" if args.checkpoint_kind == "base" else "trained potential checkpoint",
     }
+    report["corpus_sha256"] = file_digest(args.corpus)
+    report["normalization_sha256"] = serving["1"]["policy"]["normalization_sha256"]
 
 
 def main(argv=None):
@@ -361,6 +407,8 @@ def main(argv=None):
         "valid_benchmark_evaluation": False,
         "measured_gpu": False,
         "correctness_checks_passed": False,
+        "math_only": args.math_only,
+        "serving_only": args.serving_only,
         "git_head": _git_head(),
         "config": args.config,
         "checkpoint": str(args.checkpoint.resolve()),
@@ -379,8 +427,12 @@ def main(argv=None):
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
     try:
-        _qualify(args, report)
-        _qualify_policy(args, report)
+        if not args.serving_only:
+            _qualify(args, report)
+        if not args.math_only:
+            _qualify_policy(args, report)
+        if args.serving_only:
+            report["measured_gpu"] = True
         report["correctness_checks_passed"] = True
     except Exception as exc:
         report["error"] = {"type": type(exc).__name__, "message": str(exc)}

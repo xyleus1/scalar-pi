@@ -136,7 +136,8 @@ def test_uncertain_launch_is_not_retried_and_its_owned_instance_is_terminated(cl
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The remote receiver runs in Linux bash")
-def test_completed_session_receiver_preserves_script_and_cleanup(cloud, config, tmp_path, monkeypatch):
+@pytest.mark.parametrize("returncode", [0, 3])
+def test_completed_session_receiver_preserves_script_and_cleanup(cloud, config, tmp_path, monkeypatch, returncode):
     class CapturedInput(io.BytesIO):
         def close(self):
             self.payload = self.getvalue()
@@ -147,7 +148,7 @@ def test_completed_session_receiver_preserves_script_and_cleanup(cloud, config, 
 
     def popen(argv, **kwargs):
         calls.append((argv, kwargs))
-        return SimpleNamespace(stdin=stdin, poll=lambda: 0, returncode=0)
+        return SimpleNamespace(stdin=stdin, poll=lambda: returncode, returncode=returncode)
 
     client = FakeLambda(config)
     script = tmp_path / "phase.sh"
@@ -160,7 +161,11 @@ def test_completed_session_receiver_preserves_script_and_cleanup(cloud, config, 
     monkeypatch.setattr(
         cloud.subprocess, "run", lambda argv, **kwargs: (calls.append((argv, kwargs)) or SimpleNamespace(returncode=0))
     )
-    cloud.run_session(client, config, state, tmp_path / "state.json", args)
+    if returncode:
+        with pytest.raises(RuntimeError, match="Remote script failed"):
+            cloud.run_session(client, config, state, tmp_path / "state.json", args)
+    else:
+        cloud.run_session(client, config, state, tmp_path / "state.json", args)
     assert client.status == "terminated"
     assert state["runs"][0]["reports_downloaded"] is True
     assert "LAMBDA_API_KEY" not in calls[0][1]["env"]
@@ -219,6 +224,7 @@ def test_price_increase_below_configured_ceiling_still_stops_budgeted_session(cl
     assert client.status == "terminated"
     assert state["runs"][0]["hourly_rate_usd"] == 4
     assert state["runs"][0]["estimated_compute_usd"] == pytest.approx(4 * 2 / 60)
+    assert state["runs"][0]["reports_downloaded"] is True
 
 
 def test_failed_ssh_still_terminates_and_records_cost(cloud, config, tmp_path, monkeypatch):
@@ -282,6 +288,53 @@ def test_os_lock_rejects_concurrent_controller(cloud, tmp_path):
         pass
 
 
+@pytest.mark.parametrize(("stage", "hours"), [("canary", 0.251), ("qualification", 2.01), ("research", 4.01)])
+def test_supervised_sessions_have_stage_limits(cloud, config, stage, hours):
+    with pytest.raises(ValueError, match="Supervised"):
+        cloud.session_deadline(config, stage, hours, 1000)
+
+
+def test_session_cannot_straddle_announced_price_change(cloud, config):
+    config["price_change_at_utc"] = "2026-11-16T00:00:00+00:00"
+    change = cloud.dt.datetime.fromisoformat(config["price_change_at_utc"]).timestamp()
+    with pytest.raises(ValueError, match="price change"):
+        cloud.session_deadline(config, "research", 4, change - 3600)
+    assert cloud.session_deadline(config, "research", 4, change) == change + 4 * 3600
+
+
+def test_forecast_price_and_storage_are_reserved_without_double_counting(cloud, config):
+    config["forecast_hourly_rate_usd"] = 3.79
+    report = {
+        "selected_study": "pilot",
+        "budget_usd": 2000,
+        "live_hourly_rate_usd": 3.29,
+        "forecast_hourly_rate_usd": 3.79,
+        "remaining_compute_cost_with_headroom_usd": 1500,
+        "remaining_noncompute_cost_usd": 200,
+    }
+    allowance = cloud.check_allowance(config, {"runs": []}, 4, 3.29, "research", report)
+    assert allowance["session_ceiling_usd"] == pytest.approx(4 * 3.29)
+    assert allowance["with_reserve_usd"] == pytest.approx(200 + 1.2 * 4 * 3.79)
+    report["remaining_noncompute_cost_usd"] = 501
+    with pytest.raises(ValueError, match="remaining balance"):
+        cloud.check_allowance(config, {"runs": []}, 4, 3.29, "research", report)
+
+
+def test_research_scope_is_locked_before_results(cloud):
+    state = {}
+    report = {
+        "selected_study": "pilot",
+        "experiment_identity": {"code_commit": "a" * 40, "container_image_id": "sha256:" + "b" * 64},
+        "study_lock_sha256": "c" * 64,
+    }
+    cloud.bind_study(state, report, "a" * 40)
+    cloud.bind_study(state, report, "a" * 40)
+    with pytest.raises(ValueError, match="originally admitted"):
+        cloud.bind_study(state, {**report, "selected_study": "full"}, "a" * 40)
+    with pytest.raises(ValueError, match="receipt"):
+        cloud.bind_study({}, {**report, "study_lock_sha256": ""}, "a" * 40)
+
+
 def test_matrix_paths_work_on_host_and_in_containers(tmp_path):
     renderer = runpy.run_path(str(ROOT / "scripts/lambda/matrix.py"))
     full = renderer["render_matrix"](ROOT, tmp_path, "full")
@@ -308,6 +361,17 @@ def test_budget_selects_full_then_complete_pilot_then_stops():
         "effective_batch_size": 256,
         "optimizer_updates": 30000,
         "seconds_per_optimizer_update": {"B0": 1, "B1": 1, "P": 1},
+        "forecast_hourly_rate_usd": 3.79,
+        "session_hours": 4,
+        "startup_seconds_per_session": 10,
+        "shutdown_reserve_seconds": 600,
+        "storage": {
+            "gib_month_rate_usd": 0.2,
+            "current_gib": 0,
+            "additional_gib": 0,
+            "retention_hours": 720,
+            "measurement_source": "test fixture",
+        },
         "checkpoint_seconds_per_save": {"B0": 1, "B1": 1, "P": 1},
         "checkpoint_interval_updates": {"B0": 5000, "B1": 5000, "P": 5000},
         "fixed_cost_usd": 100,

@@ -1,6 +1,17 @@
 {
   "measured_gpu": false,
   "model_kind": "pi05_full",
+  "forecast_hourly_rate_usd": 3.79,
+  "session_hours": 4,
+  "startup_seconds_per_session": null,
+  "shutdown_reserve_seconds": 600,
+  "storage": {
+    "gib_month_rate_usd": null,
+    "current_gib": null,
+    "additional_gib": null,
+    "retention_hours": null,
+    "measurement_source": "REPLACE_WITH_REGIONAL_PRICE_USAGE_AND_RETENTION_RECEIPTS"
+  },
   "hardware": "REPLACE_WITH_MEASURED_GPU",
   "measurement_source": "REPLACE_WITH_RETAINED_TRAINING_PROFILE_PATHS",
   "evaluation_measurement_source": "REPLACE_WITH_RETAINED_ROLLOUT_AND_TIMING_PATHS",
@@ -27,63 +38,7 @@
   "completed_training": [],
   "completed_evaluation": [],
   "fixed_cost_usd": null,
-  "evaluation_seconds_per_episode": {
-    "B0": {
-      "1": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      },
-      "10": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      }
-    },
-    "B1": {
-      "1": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      },
-      "10": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      }
-    },
-    "P": {
-      "1": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      },
-      "10": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      }
-    },
-    "reference": {
-      "1": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      },
-      "10": {
-        "libero_spatial": null,
-        "libero_object": null,
-        "libero_goal": null,
-        "libero_10": null
-      }
-    }
-  },
-  "notes": "Unmeasured template: deliberately rejected. Use complete real-data batch-256 update profiles. Measure checkpoint_seconds_per_save for each arm; set checkpoint_interval_updates to its chosen integer cadence in 1..5000. Per-suite episode durations must conservatively account for timeout-length episodes, model calls, settling/rendering and server startup/checkpoint loading. Set experiment_identity.code_commit and .container_image_id to the pinned source and Docker image. Completed training records contain group, training_seed, optimizer_updates and checkpoint_dir; their actual research metadata and weight hashes are verified. Completed evaluation records contain group, training_seed (null for reference), num_steps, suite and manifest_path; complete 500-episode suite logs and provenance must validate. Fixed cost includes all spending so far plus storage, taxes and remaining noncompute costs. --select-study preserves full 30000-update runs and 40000 or 16000 planned episodes, subtracting only validated completed work. Retain all evidence paths alongside this file."
+  "evaluation_seconds_per_episode": null,
+  "notes": "Unmeasured template: deliberately rejected. Populate update, startup and checkpoint times from retained qualified real-data profiles. Forecast $3.79 is separate from the live provider quote. Four-hour sessions include measured startup, the shutdown reserve, periodic saves and extra saves at session boundaries. Enter the actual regional GiB-month storage price, measured current usage, expected additional artifacts and retention horizon; the docs example price is not a quote. fixed_cost_usd includes all spending so far and other nonstorage costs; future storage is computed separately. The calibration_report supplies all evaluation durations and task deadline bounds from hashed component evidence. Set experiment_identity.code_commit and container_image_id. Completed training records require group, training_seed, optimizer_updates and checkpoint_dir. Completed evaluation records require group, training_seed (null for reference), num_steps, suite and manifest_path; optionally task_id and task_log_path for a validated 50-episode task. Suite/task overlaps are rejected. Invoke --select-study --study-lock /data/experiments/reports/study_lock.json; the first affordable full/pilot choice and identity cannot change later. No shortened training or omitted tasks.",
+  "calibration_report": "/data/experiments/reports/evaluation_calibration.json"
 }

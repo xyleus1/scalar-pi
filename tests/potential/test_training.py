@@ -170,7 +170,8 @@ def _step(model, optimizer, ema):
     ema.update_parameters(model.expert)
 
 
-def test_checkpoint_ema_export_and_exact_next_step_resume(tmp_path):
+@pytest.mark.parametrize("preloaded", [False, True])
+def test_checkpoint_ema_export_and_exact_next_step_resume(tmp_path, monkeypatch, preloaded):
     seed_all(42)
     model = TinyModel()
     optimizer = torch.optim.AdamW(model.expert.parameters(), lr=0.01)
@@ -203,11 +204,17 @@ def test_checkpoint_ema_export_and_exact_next_step_resume(tmp_path):
     resumed = TinyModel()
     resumed_opt = torch.optim.AdamW(resumed.expert.parameters(), lr=0.01)
     resumed_ema = make_ema(resumed.expert)
+    if preloaded:
+        safetensors.torch.load_model(resumed, path / "raw_model.safetensors", strict=True)
+        monkeypatch.setattr(
+            safetensors.torch, "load_model", lambda *args, **kwargs: pytest.fail("Raw weights loaded twice")
+        )
     state = load_training_checkpoint(
         path,
         model=resumed,
         optimizer=resumed_opt,
         ema=resumed_ema,
+        load_weights=not preloaded,
         **metadata,
     )
     assert state["optimizer_updates"] == 1

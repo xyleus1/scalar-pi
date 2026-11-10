@@ -352,6 +352,7 @@ def load_training_checkpoint(
     action_horizon: int,
     action_dim: int,
     expected_resume_signature: dict[str, Any] | None = None,
+    load_weights: bool = True,
 ) -> dict[str, Any]:
     """Resume a checkpoint produced locally by this trainer (contains pickle)."""
     directory = Path(directory)
@@ -367,7 +368,8 @@ def load_training_checkpoint(
         validate_resume_signature(metadata.get("resume_signature", {}), expected_resume_signature)
     if sha256_file(directory / "raw_model.safetensors") != metadata["raw_model_sha256"]:
         raise ValueError("Raw model checkpoint hash mismatch")
-    safetensors.torch.load_model(model, directory / "raw_model.safetensors", strict=True)
+    if load_weights:
+        safetensors.torch.load_model(model, directory / "raw_model.safetensors", strict=True)
     state = torch.load(directory / "training_state.pt", map_location="cpu", weights_only=False)
     if expected_resume_signature is not None:
         validate_resume_signature(state.get("resume_signature", {}), expected_resume_signature)

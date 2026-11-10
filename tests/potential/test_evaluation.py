@@ -375,8 +375,8 @@ def test_official_runner_logs_and_sends_paired_noise_with_fake_simulator(tmp_pat
             return [0, 1]
 
     class FakeClient:
-        def __init__(self, host, port):
-            pass
+        def __init__(self, host, port, **timeouts):
+            assert timeouts["inference_timeout"] < timeouts["cold_inference_timeout"]
 
         def get_server_metadata(self):
             return {"checkpoint_id": "P-17", "config_name": "pi05_P", "num_steps": 1}
@@ -844,3 +844,105 @@ def test_profile_checkpoint_cannot_enter_confirmatory_evaluation():
     rows[0]["server_metadata"]["research"]["run_mode"] = "profile"
     with pytest.raises(ValueError, match="Profiling checkpoints"):
         ev.validate_results(rows, manifest, require_primary_checkpoint=True)
+
+
+def _task_fixture(tmp_path):
+    manifest = _manifest()
+    manifest.update(
+        output_dir=str(tmp_path),
+        task_shards=True,
+        require_provenance=True,
+        num_tasks_per_suite=10,
+        num_trials_per_task=50,
+        num_steps=[10],
+    )
+    manifest["variants"] = manifest["variants"][:1]
+    return manifest, ev.matrix_cells(manifest)[0], _records(manifest)
+
+
+def test_task_shards_preserve_original_ids_and_aggregate_exactly500(tmp_path):
+    manifest, cell, records = _task_fixture(tmp_path)
+    for task in range(10):
+        _write_rows(ev.task_log_path(cell, task), [row for row in records if row["task_id"] == task])
+    rows = ev.validate_task_log(manifest, cell, 9, ev.task_log_path(cell, 9))
+    assert {row["task_id"] for row in rows} == {9}
+    assert {row["initial_state_id"] for row in rows} == set(range(50))
+    assert ev.aggregate_tasks(manifest, cell)["episodes"] == 500
+    assert ev.validate_results(ev.read_episodes([cell["episode_log_path"]]), manifest)["episodes"] == 500
+    receipt = json.loads(Path(cell["episode_log_path"]).with_suffix(".task_receipt.json").read_text())
+    assert len(receipt["tasks"]) == 10
+
+
+@pytest.mark.parametrize("corruption", ["partial", "duplicate", "renumber", "infra", "provenance"])
+def test_task_aggregation_rejects_partial_or_inconsistent_attempts(tmp_path, corruption):
+    manifest, cell, records = _task_fixture(tmp_path)
+    for task in range(10):
+        rows = [row for row in records if row["task_id"] == task]
+        if task == 9:
+            if corruption == "partial":
+                rows.pop()
+            elif corruption == "duplicate":
+                rows.append(copy.deepcopy(rows[0]))
+            elif corruption == "renumber":
+                rows[0]["task_id"] = 0
+            elif corruption == "infra":
+                rows[0]["failure_kind"] = "infrastructure"
+            else:
+                for row in rows:
+                    row["_provenance"]["source"]["commit"] = "b" * 40
+                    row["provenance_sha256"] = ev.content_digest(row["_provenance"])
+        _write_rows(ev.task_log_path(cell, task), rows)
+    with pytest.raises(ValueError, match="Incomplete|Duplicate|Unexpected|Infrastructure|changed within"):
+        ev.aggregate_tasks(manifest, cell)
+    assert not Path(cell["episode_log_path"]).exists()
+
+
+def test_task_resume_reuses_complete_tasks_and_selects_explicit_retry(tmp_path):
+    manifest, cell, records = _task_fixture(tmp_path)
+    _write_rows(ev.task_log_path(cell, 0), records[:50])
+    _write_rows(ev.task_log_path(cell, 1), records[50:90])
+    runner = _load_script("evaluate_potential")
+    with pytest.raises(ValueError, match="Incomplete"):
+        runner.commands(manifest, resume_completed_suites=True)
+    key = f"{cell['checkpoint_id']}/k10/{cell['suite']}/task-01"
+    manifest["task_attempts"] = {key: "retry-02"}
+    pending = runner.commands(manifest, resume_completed_suites=True)[0]["clients"][0]
+    assert pending["task_ids"] == list(range(1, 10))
+    assert "retry-02" in pending["argv"][-7] or "retry-02" in " ".join(pending["argv"])
+    assert len(ev.read_episodes([ev.task_log_path(cell, 1)])) == 40
+
+
+def test_deadline_does_not_launch_a_task_that_cannot_finish(tmp_path, monkeypatch, capsys):
+    manifest, _, _ = _task_fixture(tmp_path)
+    runner = _load_script("evaluate_potential")
+    monkeypatch.setenv("SCALAR_PI_DEADLINE_UNIX", "2000")
+    monkeypatch.setattr(runner.time, "time", lambda: 1000)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: pytest.fail("No task fits"))
+    monkeypatch.setattr(
+        runner.socket, "create_connection", lambda *a, **kw: (_ for _ in ()).throw(ConnectionRefusedError())
+    )
+    runner.execute(manifest)
+    assert json.loads(capsys.readouterr().out)["status"] == "deferred"
+    assert not list(tmp_path.rglob("*.jsonl"))
+
+
+def test_empty_deadline_allows_offline_aggregation_without_launch(tmp_path, monkeypatch, capsys):
+    manifest, cell, records = _task_fixture(tmp_path)
+    for task in range(10):
+        _write_rows(ev.task_log_path(cell, task), [row for row in records if row["task_id"] == task])
+    runner = _load_script("evaluate_potential")
+    monkeypatch.setenv("SCALAR_PI_DEADLINE_UNIX", "")
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: pytest.fail("Aggregation must not launch"))
+    runner.execute(manifest, resume_completed_suites=True)
+    assert json.loads(capsys.readouterr().out)["episodes"] == 500
+
+
+def test_cleanup_reserve_cannot_be_reduced_below_ten_minutes(tmp_path, monkeypatch):
+    manifest, _, _ = _task_fixture(tmp_path)
+    manifest["cleanup_seconds"] = 599
+    runner = _load_script("evaluate_potential")
+    monkeypatch.setattr(
+        runner.socket, "create_connection", lambda *a, **kw: (_ for _ in ()).throw(ConnectionRefusedError())
+    )
+    with pytest.raises(ValueError, match="600 seconds"):
+        runner.execute(manifest)

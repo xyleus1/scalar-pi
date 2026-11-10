@@ -109,6 +109,7 @@ def main(argv=None):
     parser.add_argument("--selection", dest="verify_report", type=Path, required=True)
     parser.add_argument("--weights", type=Path, required=True)
     parser.add_argument("--data-manifest", type=Path, required=True)
+    parser.add_argument("--qualification-report", type=Path, required=True)
     args = parser.parse_args(argv)
     verifier = runpy.run_path(str(Path(__file__).resolve().parents[1] / "select_potential_batch.py"))
     selection = verifier["verify_report"](args)

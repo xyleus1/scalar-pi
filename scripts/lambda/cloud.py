@@ -43,10 +43,15 @@ class LambdaClient:
         if not key:
             raise ValueError("Load LAMBDA_API_KEY using the private PowerShell loader")
         self.key = key
+        self._next_request = 0.0
 
     def request(self, method, endpoint, body=None):
         if not re.fullmatch(r"[a-z0-9/-]+", endpoint):
             raise ValueError("Invalid Lambda API endpoint")
+        # The account API is limited to one request/second. Space calls rather
+        # than retrying a mutation whose first response might have been lost.
+        time.sleep(max(0, self._next_request - time.monotonic()))
+        self._next_request = time.monotonic() + 1.05
         request = urllib.request.Request(
             API + endpoint,
             data=None if body is None else json.dumps(body).encode(),
@@ -119,6 +124,26 @@ def validate_config(config):
         raise ValueError("This study is authorized for $2,000, with $100 for qualification")
     for key in ("noncompute_spent_usd", "noncompute_reserve_usd"):
         finite_positive(config[key], key, zero=True)
+    forecast_rate = config.get("forecast_hourly_rate_usd", config["max_hourly_rate_usd"])
+    finite_positive(forecast_rate, "forecast_hourly_rate_usd")
+    if forecast_rate < config["max_hourly_rate_usd"]:
+        raise ValueError("Forecast rate must cover the maximum permitted live rate")
+
+
+def session_deadline(config, stage, hours, started):
+    finite_positive(hours, "max_hours")
+    maximum = {"canary": 0.25, "qualification": 2, "research": 4}[stage]
+    if hours > maximum:
+        raise ValueError(f"Supervised {stage} sessions are limited to {maximum} hours")
+    deadline = started + hours * 3600
+    transition = config.get("price_change_at_utc")
+    if transition:
+        change = dt.datetime.fromisoformat(transition)
+        if change.tzinfo is None:
+            raise ValueError("price_change_at_utc must include a UTC offset")
+        if started < change.timestamp() <= deadline:
+            raise ValueError("Session would cross the announced price change; choose a shorter session")
+    return deadline
 
 
 def session_cost(run, now=None):
@@ -131,24 +156,66 @@ def session_cost(run, now=None):
 def check_allowance(config, state, hours, rate, stage, budget_report=None):
     finite_positive(hours, "max_hours")
     finite_positive(rate, "hourly_rate")
+    forecast_rate = finite_positive(config.get("forecast_hourly_rate_usd", rate), "forecast_hourly_rate_usd")
+    if forecast_rate < rate:
+        raise ValueError("Live price exceeds the forecast rate; regenerate the budget")
     spent = sum(session_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
-    forecast = spent + config["noncompute_reserve_usd"] + 1.2 * hours * rate
+    reserve = config["noncompute_reserve_usd"]
+    if budget_report:
+        reserve = max(
+            reserve,
+            finite_positive(budget_report.get("remaining_noncompute_cost_usd", 0), "storage reserve", zero=True),
+        )
+    forecast = spent + reserve + 1.2 * hours * forecast_rate
     if forecast > config["budget_usd"]:
         raise ValueError("Session lifetime plus reserve exceeds the remaining project budget")
-    if stage == "qualification":
-        phase_spent = sum(session_cost(run) for run in state["runs"] if run["stage"] == stage)
-        if phase_spent + config["noncompute_spent_usd"] + 1.2 * hours * rate > config["qualification_budget_usd"]:
+    if stage in {"canary", "qualification"}:
+        phase_spent = sum(session_cost(run) for run in state["runs"] if run["stage"] in {"canary", "qualification"})
+        if (
+            phase_spent + config["noncompute_spent_usd"] + 1.2 * hours * forecast_rate
+            > config["qualification_budget_usd"]
+        ):
             raise ValueError("Qualification session exceeds the $100 phase allowance")
     else:
         if not budget_report or budget_report.get("selected_study") not in {"full", "pilot"}:
             raise ValueError("Research requires a measured full/pilot budget decision")
-        if budget_report.get("budget_usd") != config["budget_usd"] or budget_report.get("hourly_rate_usd") != rate:
+        if (
+            budget_report.get("budget_usd") != config["budget_usd"]
+            or budget_report.get("live_hourly_rate_usd", budget_report.get("hourly_rate_usd")) != rate
+            or budget_report.get("forecast_hourly_rate_usd", rate) != forecast_rate
+        ):
             raise ValueError("Budget report ceiling/rate differs from this session; regenerate it")
         remaining = budget_report.get("remaining_compute_cost_with_headroom_usd")
         finite_positive(remaining, "remaining_compute_cost_with_headroom_usd", zero=True)
-        if spent + config["noncompute_reserve_usd"] + remaining > config["budget_usd"]:
+        if spent + reserve + remaining > config["budget_usd"]:
             raise ValueError("Measured study no longer fits the remaining balance; regenerate its budget decision")
-    return {"spent_usd": spent, "session_ceiling_usd": hours * rate, "with_reserve_usd": forecast}
+    return {
+        "spent_usd": spent,
+        "session_ceiling_usd": hours * rate,
+        "forecast_hourly_rate_usd": forecast_rate,
+        "remaining_noncompute_reserve_usd": reserve,
+        "with_reserve_usd": forecast,
+    }
+
+
+def bind_study(state, report, commit):
+    """Once admitted, a study cannot change scope or scientific identity on resume."""
+    identity = report.get("experiment_identity", {})
+    if identity.get("code_commit") != commit or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", identity.get("container_image_id", "")
+    ):
+        raise ValueError("Research budget must identify the exact source and container")
+    lock_hash = report.get("study_lock_sha256", "")
+    if not re.fullmatch(r"[a-f0-9]{64}", lock_hash):
+        raise ValueError("Research requires an immutable study decision receipt")
+    decision = {
+        "selected_study": report["selected_study"],
+        "experiment_identity": identity,
+        "study_lock_sha256": lock_hash,
+    }
+    if state.get("study_decision", decision) != decision:
+        raise ValueError("Research scope or identity differs from the originally admitted study")
+    state["study_decision"] = decision
 
 
 def select_type(client, config):
@@ -271,7 +338,7 @@ def terminate(client, state, state_path, instance_id):
     raise RuntimeError("Termination not confirmed. Check Lambda immediately; ledger remains open.")
 
 
-def remote_script(commit, script):
+def remote_script(commit, script, *, with_submodules=True):
     root = shlex.quote(REMOTE_ROOT)
     return (
         "set -euo pipefail\nsudo cloud-init status --wait\n"
@@ -279,7 +346,9 @@ def remote_script(commit, script):
         f"if [ ! -d repo/.git ]; then git clone {shlex.quote(REPOSITORY)} repo; fi\n"
         'cd repo\ntest -z "$(git status --porcelain)"\n'
         f"git fetch origin {commit}\ngit checkout --detach {commit}\n"
-        "git submodule update --init --recursive\n" + script.replace("\r\n", "\n") + "\n"
+        + ("git submodule update --init --recursive\n" if with_submodules else "")
+        + script.replace("\r\n", "\n")
+        + "\n"
     )
 
 
@@ -290,6 +359,8 @@ def run_session(client, config, state, state_path, args):
         raise ValueError("A recorded session is still open; reconcile/terminate it first")
     if not {"ssh_key_id", "filesystem_id"}.issubset(state["resources"]):
         raise ValueError("Run prepare first")
+    started = time.time()
+    deadline = session_deadline(config, args.stage, args.max_hours, started)
     rate = select_type(client, config)
     report = json.loads(args.budget_report.read_text()) if args.budget_report else None
     if report and "budget" in report:
@@ -297,6 +368,8 @@ def run_session(client, config, state, state_path, args):
     allowance = check_allowance(config, state, args.max_hours, rate, args.stage, report)
     if report and report.get("experiment_identity", {}).get("code_commit", args.commit) != args.commit:
         raise ValueError("Budget was measured for a different source commit")
+    if args.stage == "research":
+        bind_study(state, report, args.commit)
     images = client.request("GET", "images")
     if not any(
         image["id"] == config["image_id"]
@@ -308,10 +381,10 @@ def run_session(client, config, state, state_path, args):
         raise ValueError("Configured image is not an available x86-64 GPU Base 22.04 image in this region")
     name = "scalar-pi-" + uuid.uuid4().hex[:12]
     body = launch_body(config, state, args.commit, name)
-    started = time.time()
     exports = (
         f"export SCALAR_PI_HOURLY_RATE_USD={rate}\n"
-        f"export SCALAR_PI_DEADLINE_UNIX={started + args.max_hours * 3600}\n"
+        f"export SCALAR_PI_FORECAST_RATE_USD={allowance['forecast_hourly_rate_usd']}\n"
+        f"export SCALAR_PI_DEADLINE_UNIX={deadline}\n"
         f"export SCALAR_PI_ATTEMPT={name}\n"
     )
     if args.budget_report:
@@ -321,7 +394,9 @@ def run_session(client, config, state, state_path, args):
             f"mkdir -p {REMOTE_ROOT}/data/experiments/reports\n"
             f"printf '%s' '{encoded}' | base64 --decode > {REMOTE_ROOT}/data/experiments/reports/budget.json\n"
         )
-    script = remote_script(args.commit, exports + args.script.read_text(encoding="utf-8-sig"))
+    script = remote_script(
+        args.commit, exports + args.script.read_text(encoding="utf-8-sig"), with_submodules=args.stage != "canary"
+    )
     pending = {
         "name": name,
         "commit": args.commit,
@@ -351,8 +426,8 @@ def run_session(client, config, state, state_path, args):
     run = {**pending, "instance_id": instance_id}
     state["runs"].append(run)
     del state["pending_launch"]
-    deadline = started + args.max_hours * 3600
     process = None
+    transfer_context = None
     try:
         save_state(state_path, state)
         while time.time() < deadline:
@@ -398,6 +473,7 @@ def run_session(client, config, state, state_path, args):
             time.sleep(min(5, max(0, ssh_deadline - time.time())))
         else:
             raise TimeoutError("SSH did not become ready within the session allowance")
+        transfer_context = (ssh_options, environment, instance["ip"])
         with log.open("wb") as output:
             process = subprocess.Popen(
                 command,
@@ -422,23 +498,6 @@ def run_session(client, config, state, state_path, args):
                         raise RuntimeError("Provider price rose above the budgeted rate; terminating GPU")
                     next_quote_check = time.time() + 60
                 time.sleep(1)
-        if deadline - time.time() > 5:
-            destination = state_path.parent / "reports" / name
-            destination.mkdir(parents=True, exist_ok=True)
-            transfer = [
-                "scp",
-                "-r",
-                *ssh_options,
-                "ubuntu@" + instance["ip"] + ":" + REMOTE_ROOT + "/data/experiments/reports/.",
-                str(destination),
-            ]
-            try:
-                result = subprocess.run(
-                    transfer, env=environment, capture_output=True, timeout=min(60, deadline - time.time()), check=False
-                )
-                run["reports_downloaded"] = result.returncode == 0
-            except (OSError, subprocess.TimeoutExpired):
-                run["reports_downloaded"] = False
         if process.returncode:
             raise RuntimeError(f"Remote script failed with exit {process.returncode}; see {log}")
     finally:
@@ -447,7 +506,32 @@ def run_session(client, config, state, state_path, args):
                 process.terminate()
                 process.wait(timeout=10)
         finally:
-            terminate(client, state, state_path, instance_id)
+            try:
+                run["reports_downloaded"] = False
+                if transfer_context and deadline - time.time() > 5:
+                    options, environment, ip = transfer_context
+                    destination = state_path.parent / "reports" / name
+                    destination.mkdir(parents=True, exist_ok=True)
+                    transfer = [
+                        "scp",
+                        "-r",
+                        *options,
+                        "ubuntu@" + ip + ":" + REMOTE_ROOT + "/data/experiments/reports/.",
+                        str(destination),
+                    ]
+                    try:
+                        result = subprocess.run(
+                            transfer,
+                            env=environment,
+                            capture_output=True,
+                            timeout=min(60, deadline - time.time()),
+                            check=False,
+                        )
+                        run["reports_downloaded"] = result.returncode == 0
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+            finally:
+                terminate(client, state, state_path, instance_id)
 
 
 def main(argv=None):
@@ -458,7 +542,7 @@ def main(argv=None):
     parser.add_argument("--script", type=Path)
     parser.add_argument("--commit")
     parser.add_argument("--max-hours", type=float)
-    parser.add_argument("--stage", choices=("qualification", "research"), default="qualification")
+    parser.add_argument("--stage", choices=("canary", "qualification", "research"), default="qualification")
     parser.add_argument("--budget-report", type=Path)
     parser.add_argument("--instance-id")
     args = parser.parse_args(argv)

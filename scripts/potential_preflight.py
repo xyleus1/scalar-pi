@@ -117,7 +117,7 @@ def estimate_budget(profile: dict, hourly_rate_usd: float, budget_usd: float) ->
     }
 
 
-def _study_progress(profile: dict) -> tuple[dict, set, list]:
+def _study_progress(profile: dict) -> tuple[dict, dict, list]:
     """Only subtract work backed by complete checkpoint or validated suite artifacts."""
     identity = profile.get("experiment_identity", {})
     if not isinstance(identity, dict) or set(identity) - {"code_commit", "container_image_id"}:
@@ -130,7 +130,7 @@ def _study_progress(profile: dict) -> tuple[dict, set, list]:
         if any(record.get(key) != value for key, value in identity.items()):
             raise ValueError("Completed artifact belongs to a different experiment identity")
 
-    training, evaluation_cells, receipts = {}, set(), []
+    training, evaluation_cells, receipts = {}, {}, []
     for field in ("completed_training", "completed_evaluation"):
         if not isinstance(profile.get(field, []), list):
             raise ValueError(f"{field} must be a list of artifact-backed records")
@@ -190,8 +190,12 @@ def _study_progress(profile: dict) -> tuple[dict, set, list]:
         if suite not in {"libero_spatial", "libero_object", "libero_goal", "libero_10"}:
             raise ValueError("Completed evaluation has an unsupported suite")
         key = (group, seed, steps, suite)
-        if key in evaluation_cells:
-            raise ValueError("Duplicate completed evaluation cell")
+        task = record.get("task_id")
+        if task is not None and (type(task) is not int or task not in range(10)):
+            raise ValueError("Completed task_id must be an integer in 0..9")
+        tasks = set(range(10)) if task is None else {task}
+        if evaluation_cells.get(key, set()) & tasks:
+            raise ValueError("Duplicate completed evaluation task or overlapping suite")
         if not isinstance(record.get("manifest_path"), str) or not record["manifest_path"]:
             raise ValueError("Completed evaluation requires its original manifest_path")
         from openpi.research import evaluation
@@ -218,10 +222,17 @@ def _study_progress(profile: dict) -> tuple[dict, set, list]:
             "suites": [suite],
             "suite_attempts": {k: v for k, v in manifest.get("suite_attempts", {}).items() if k == attempt_key},
         }
-        episodes = evaluation.read_episodes([cell["episode_log_path"]])
-        evaluation.validate_results(episodes, subset, require_primary_checkpoint=True)
-        if len(episodes) != 500:
-            raise ValueError("Completed suite must contain all 500 prescribed episodes")
+        if task is None:
+            log_path = cell["episode_log_path"]
+            episodes = evaluation.read_episodes([log_path])
+            evaluation.validate_results(episodes, subset, require_primary_checkpoint=True)
+            if len(episodes) != 500:
+                raise ValueError("Completed suite must contain all 500 prescribed episodes")
+        else:
+            log_path = record.get("task_log_path")
+            if not isinstance(log_path, str) or not log_path:
+                raise ValueError("Completed task requires task_log_path")
+            episodes = evaluation.validate_task_log(manifest, cell, task, log_path)
         first = episodes[0]
         check_identity(
             {
@@ -229,18 +240,52 @@ def _study_progress(profile: dict) -> tuple[dict, set, list]:
                 "container_image_id": first["server_metadata"]["runtime"]["container_image"],
             }
         )
-        evaluation_cells.add(key)
+        evaluation_cells.setdefault(key, set()).update(tasks)
         receipts.append(
             {
                 **record,
-                "episode_log_path": cell["episode_log_path"],
-                "episode_log_sha256": sha256_file(Path(cell["episode_log_path"])),
+                "episode_log_path": log_path,
+                "episode_log_sha256": sha256_file(Path(log_path)),
+                "validated_episodes": len(episodes),
             }
         )
     return training, evaluation_cells, receipts
 
 
-def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> dict:
+def calibration_evidence(profile: dict, *, required=False):
+    path = profile.get("calibration_report")
+    if not path:
+        if required:
+            raise ValueError("Study selection requires the retained calibration_report")
+        return None
+    report = read_json(Path(path))
+    if (
+        report.get("schema_version") != 1
+        or report.get("purpose") != "evaluation_cost_calibration"
+        or report.get("passed") is not True
+    ):
+        raise ValueError("Evaluation calibration did not pass")
+    source = report.get("source", {})
+    identity = profile.get("experiment_identity", {})
+    if (
+        source.get("tracked_changes") != ""
+        or source.get("commit") != identity.get("code_commit")
+        or report.get("model_image") != identity.get("container_image_id")
+    ):
+        raise ValueError("Evaluation calibration belongs to a different source or model image")
+    evidence = report.get("evidence")
+    if not isinstance(evidence, dict) or not evidence:
+        raise ValueError("Evaluation calibration needs retained component evidence")
+    for filename, expected in evidence.items():
+        if sha256_file(Path(filename)) != expected:
+            raise ValueError("Evaluation calibration component evidence changed")
+    declared = profile.get("evaluation_seconds_per_episode")
+    if declared is not None and declared != report.get("evaluation_seconds_per_episode"):
+        raise ValueError("Declared evaluation durations differ from calibration evidence")
+    return report
+
+
+def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float, *, study_lock: dict | None = None) -> dict:
     """Choose full study, then the fixed seed-42 pilot, without reducing exposure.
 
     Input durations must bound each suite/group/K on the chosen hardware. A
@@ -249,11 +294,44 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
     """
     if set(profile.get("seconds_per_optimizer_update", {})) != {"B0", "B1", "P"}:
         raise ValueError("Study selection requires complete optimizer profiles for B0, B1, and P")
-    durations = profile.get("evaluation_seconds_per_episode")
+    calibration = calibration_evidence(profile)
+    durations = (calibration or profile).get("evaluation_seconds_per_episode")
     if not isinstance(durations, dict) or set(durations) != {"B0", "B1", "P", "reference"}:
         raise ValueError("Provide evaluation durations for all three arms and the released reference")
     if not profile.get("evaluation_measurement_source"):
         raise ValueError("Retain and identify the evaluation timing measurements")
+    live_rate = positive_number(hourly_rate_usd, "hourly_rate_usd")
+    forecast_rate = positive_number(profile.get("forecast_hourly_rate_usd"), "forecast_hourly_rate_usd")
+    if forecast_rate < 3.79:
+        raise ValueError("Forecast rate must cover the announced $3.79 H100 PCIe rate")
+    if forecast_rate < live_rate:
+        raise ValueError("Forecast rate cannot be below the live provider rate")
+    session_seconds = 3600 * positive_number(profile.get("session_hours"), "session_hours")
+    if session_seconds > 4 * 3600:
+        raise ValueError("Research sessions cannot exceed four hours")
+    startup = positive_number(profile.get("startup_seconds_per_session"), "startup_seconds_per_session")
+    shutdown = positive_number(profile.get("shutdown_reserve_seconds"), "shutdown_reserve_seconds")
+    if shutdown < 600:
+        raise ValueError("shutdown_reserve_seconds must cover the trainer's 600-second minimum")
+    productive = session_seconds - startup - shutdown
+    if productive <= 0:
+        raise ValueError("Session must have time remaining after startup and shutdown")
+    storage = profile.get("storage", {})
+    if not isinstance(storage, dict) or not storage.get("measurement_source"):
+        raise ValueError("Provide measured storage usage, regional price and retention evidence")
+    storage_rate = positive_number(storage.get("gib_month_rate_usd"), "storage.gib_month_rate_usd")
+    storage_gib = sum(
+        positive_number(storage.get(key), f"storage.{key}", allow_zero=True)
+        for key in ("current_gib", "additional_gib")
+    )
+    storage_hours = positive_number(storage.get("retention_hours"), "storage.retention_hours")
+    storage_cost = storage_rate * storage_gib * storage_hours / 720
+    if study_lock is not None and (
+        study_lock.get("schema_version") != 1
+        or study_lock.get("selected_study") not in {"full", "pilot"}
+        or study_lock.get("experiment_identity") != profile.get("experiment_identity", {})
+    ):
+        raise ValueError("Study lock identity differs from the measured experiment")
     checkpoint_times = profile.get("checkpoint_seconds_per_save", {})
     checkpoint_intervals = profile.get("checkpoint_interval_updates", {})
     if set(checkpoint_times) != {"B0", "B1", "P"} or set(checkpoint_intervals) != {"B0", "B1", "P"}:
@@ -270,6 +348,8 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
         seed_count = len(seeds)
         cells = []
         remaining_eval_seconds = 0.0
+        eval_sessions = 0
+        eval_session_used = 0.0
         completed_episodes = 0
         for group in ("B0", "B1", "P", "reference"):
             if set(durations[group]) != {"1", "10"}:
@@ -288,34 +368,69 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
                         }
                     )
                     for seed in (None,) if group == "reference" else seeds:
-                        if (group, seed, int(steps), suite) in completed_evaluation:
-                            completed_episodes += 500
-                        else:
-                            remaining_eval_seconds += 500 * positive_number(
-                                durations[group][steps][suite], "seconds_per_episode"
+                        finished_tasks = completed_evaluation.get((group, seed, int(steps), suite), set())
+                        completed_episodes += 50 * len(finished_tasks)
+                        task_seconds = 50 * positive_number(durations[group][steps][suite], "seconds_per_episode")
+                        admission = (
+                            positive_number(
+                                calibration["task_budget_seconds"][group][steps][suite], "task_budget_seconds"
                             )
+                            if calibration
+                            else task_seconds
+                        )
+                        if admission < task_seconds:
+                            raise ValueError("Task deadline budget cannot be below measured task time")
+                        if admission > productive:
+                            raise ValueError(
+                                "A 50-episode task exceeds the bounded session; revise the measured execution plan"
+                            )
+                        remaining_tasks = 10 - len(finished_tasks)
+                        remaining_eval_seconds += remaining_tasks * task_seconds
+                        for _ in range(remaining_tasks):
+                            if eval_session_used == 0 or eval_session_used + admission > productive:
+                                eval_sessions += 1
+                                eval_session_used = admission
+                            else:
+                                eval_session_used += admission
         scenario = {
             **profile,
             "training_seeds": seed_count,
             "evaluation_cells": cells,
             "evaluation_episodes": sum(cell["episodes"] for cell in cells),
         }
-        forecast = estimate_budget(scenario, hourly_rate_usd, budget_usd)
+        forecast = estimate_budget(scenario, forecast_rate, budget_usd)
         remaining_train_seconds = checkpoint_seconds = 0.0
-        completed_updates = remaining_saves = 0
+        completed_updates = remaining_saves = training_sessions = boundary_saves = 0
         for group in ("B0", "B1", "P"):
             for seed in seeds:
                 done = completed_training.get((group, seed), 0)
                 completed_updates += done
-                remaining_train_seconds += (30_000 - done) * profile["seconds_per_optimizer_update"][group]
+                run_seconds = (30_000 - done) * profile["seconds_per_optimizer_update"][group]
+                remaining_train_seconds += run_seconds
                 interval = checkpoint_intervals[group]
                 saves = 30_000 // interval - done // interval + int(done < 30_000 and 30_000 % interval != 0)
-                remaining_saves += saves
-                checkpoint_seconds += saves * checkpoint_times[group]
+                checkpoint_time = checkpoint_times[group]
+                if checkpoint_time >= productive:
+                    raise ValueError("Checkpoint publication cannot fit inside the session")
+                # n sessions add at most n-1 boundary saves. Solve the bound
+                # directly instead of iterating when checkpoint I/O is slow.
+                sessions = (
+                    max(1, math.ceil((run_seconds + (saves - 1) * checkpoint_time) / (productive - checkpoint_time)))
+                    if done < 30_000
+                    else 0
+                )
+                extra_saves = max(0, sessions - 1)
+                training_sessions += sessions
+                boundary_saves += extra_saves
+                remaining_saves += saves + extra_saves
+                checkpoint_seconds += (saves + extra_saves) * checkpoint_time
+        startup_shutdown_seconds = (training_sessions + eval_sessions) * (startup + shutdown)
         remaining_compute = (
-            hourly_rate_usd * (remaining_train_seconds + remaining_eval_seconds + checkpoint_seconds) / 3600
+            forecast_rate
+            * (remaining_train_seconds + remaining_eval_seconds + checkpoint_seconds + startup_shutdown_seconds)
+            / 3600
         )
-        total = forecast["fixed_cost_usd"] + 1.2 * remaining_compute
+        total = forecast["fixed_cost_usd"] + storage_cost + 1.2 * remaining_compute
         studies[study] = {
             **forecast,
             "planned_training_gpu_hours": forecast["training_gpu_hours"],
@@ -323,6 +438,13 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
             "training_gpu_hours": remaining_train_seconds / 3600,
             "evaluation_gpu_hours": remaining_eval_seconds / 3600,
             "checkpoint_gpu_hours": checkpoint_seconds / 3600,
+            "startup_shutdown_gpu_hours": startup_shutdown_seconds / 3600,
+            "remaining_training_sessions": training_sessions,
+            "remaining_evaluation_sessions": eval_sessions,
+            "remaining_boundary_saves": boundary_saves,
+            "remaining_periodic_saves": remaining_saves - boundary_saves,
+            "remaining_storage_cost_usd": storage_cost,
+            "minimum_storage_retention_hours": 336 + 1.2 * remaining_compute / forecast_rate,
             "planned_optimizer_updates": seed_count * 3 * 30_000,
             "completed_optimizer_updates": completed_updates,
             "remaining_optimizer_updates": seed_count * 3 * 30_000 - completed_updates,
@@ -335,12 +457,17 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
             "projected_total_usd": total,
             "within_budget": total <= budget_usd,
         }
-    selected = next((name for name in ("full", "pilot") if studies[name]["within_budget"]), None)
+    candidates = (study_lock["selected_study"],) if study_lock is not None else ("full", "pilot")
+    selected = next((name for name in candidates if studies[name]["within_budget"]), None)
+    if selected and storage_hours < studies[selected]["minimum_storage_retention_hours"]:
+        raise ValueError("storage.retention_hours must cover projected completion plus 336 hours for export")
     return {
         "schema_version": 1,
         "selected_study": selected,
         "budget_usd": budget_usd,
-        "hourly_rate_usd": hourly_rate_usd,
+        "hourly_rate_usd": live_rate,
+        "live_hourly_rate_usd": live_rate,
+        "forecast_hourly_rate_usd": forecast_rate,
         "studies": studies,
         "training_seeds": [17, 42, 93] if selected == "full" else ([42] if selected == "pilot" else []),
         "optimizer_updates": 30000,
@@ -350,11 +477,40 @@ def choose_study(profile: dict, hourly_rate_usd: float, budget_usd: float) -> di
         ),
         "measurement_source": profile["measurement_source"],
         "evaluation_measurement_source": profile["evaluation_measurement_source"],
+        "calibration_report_sha256": sha256_file(Path(profile["calibration_report"])) if calibration else None,
         "checkpoint_interval_updates": dict(checkpoint_intervals),
+        "checkpoint_seconds_per_save": dict(checkpoint_times),
+        "seconds_per_optimizer_update": dict(profile["seconds_per_optimizer_update"]),
+        "startup_seconds_per_session": startup,
+        "session_hours": session_seconds / 3600,
+        "shutdown_reserve_seconds": shutdown,
+        "remaining_noncompute_cost_usd": storage_cost,
+        "storage": storage,
+        "locked_study": study_lock["selected_study"] if study_lock else None,
         "experiment_identity": profile.get("experiment_identity", {}),
         "validated_progress": receipts,
-        "note": "Remaining work only; fixed cost includes all spending so far and noncompute reserves. No shortened-run fallback.",
+        "note": "Remaining work, startup/restart and boundary saves are included. Fixed cost covers past spending and other nonstorage costs; projected storage is separate. Locked studies never change scope.",
     }
+
+
+def locked_budget(profile, live_rate, ceiling, lock_path):
+    """Create the initial decision once; later forecasts retain that exact scope."""
+    calibration_evidence(profile, required=True)
+    existing = read_json(lock_path) if lock_path.exists() else None
+    result = choose_study(profile, live_rate, ceiling, study_lock=existing)
+    if existing is None and result["selected_study"] is not None:
+        identity = profile.get("experiment_identity", {})
+        if set(identity) != {"code_commit", "container_image_id"}:
+            raise ValueError("Locking a study requires its actual source commit and model image identity")
+        existing = {"schema_version": 1, "selected_study": result["selected_study"], "experiment_identity": identity}
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("x", encoding="utf-8") as stream:
+            json.dump(existing, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+    if existing is not None:
+        result["study_lock_sha256"] = sha256_file(lock_path)
+        result["locked_study"] = existing["selected_study"]
+    return result
 
 
 def inspect_stack(repo: Path) -> dict:
@@ -508,6 +664,9 @@ def main() -> int:
         "--select-study", action="store_true", help="Choose full/pilot from per-arm and per-suite timings"
     )
     parser.add_argument("--hourly-rate-usd", type=float)
+    parser.add_argument(
+        "--study-lock", type=Path, help="Immutable initial full/pilot decision; required with --select-study"
+    )
     parser.add_argument("--budget-usd", type=float, default=2000.0)
     parser.add_argument("--report", type=Path, help="Optionally save the exact JSON report")
     parser.add_argument("--require-cuda", action="store_true")
@@ -515,6 +674,8 @@ def main() -> int:
     parser.add_argument("--require-profile", action="store_true")
     parser.add_argument("--strict-stack", action="store_true")
     args = parser.parse_args()
+    if args.select_study and args.study_lock is None:
+        parser.error("--select-study requires --study-lock")
     repo = Path(__file__).resolve().parents[1]
     stack = inspect_stack(repo)
     errors = []
@@ -526,8 +687,11 @@ def main() -> int:
     budget = {"status": "not measured"}
     if args.profile is not None:
         try:
-            budget = (choose_study if args.select_study else estimate_budget)(
-                read_json(args.profile), args.hourly_rate_usd, args.budget_usd
+            profile = read_json(args.profile)
+            budget = (
+                locked_budget(profile, args.hourly_rate_usd, args.budget_usd, args.study_lock)
+                if args.select_study
+                else estimate_budget(profile, args.hourly_rate_usd, args.budget_usd)
             )
         except (OSError, ValueError, TypeError) as exc:
             budget = {"status": "invalid measurement record", "error": str(exc)}

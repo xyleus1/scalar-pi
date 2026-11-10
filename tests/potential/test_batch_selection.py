@@ -27,6 +27,8 @@ def arguments(tmp_path):
     (weights / "config.json").write_text("{}")
     data = tmp_path / "manifest.json"
     data.write_text("{}")
+    qualification = tmp_path / "qualification.json"
+    qualification.write_text("{}")
     return argparse.Namespace(
         weights=weights,
         data_manifest=data,
@@ -35,12 +37,15 @@ def arguments(tmp_path):
         hourly_rate=3.29,
         seed=42,
         num_workers=2,
+        qualification_report=qualification,
+        deadline_unix=None,
     )
 
 
 def trainer_mock(module, args, monkeypatch, outcomes):
     called = []
     monkeypatch.setenv("SCALAR_PI_IMAGE_ID", "sha256:fixture")
+    monkeypatch.setattr(module, "_qualified", lambda args: {})
 
     def run(argv, *, stdout, stderr, check):
         assert stderr == subprocess.STDOUT
@@ -57,11 +62,13 @@ def trainer_mock(module, args, monkeypatch, outcomes):
         path.mkdir(parents=True)
         profile = {
             "measured_gpu": True,
-            "mode": "profile",
+            "mode": "fit",
+            "fit_probe_passed": True,
+            "valid_training_cost_profile": False,
             "completed_updates": 2,
             "timed_optimizer_updates": 1,
             "effective_batch_size": 256,
-            "checkpoint_seconds": [1.0],
+            "checkpoint_seconds": [],
             "total_memory_bytes": 100,
             "peak_reserved_bytes": outcome,
         }
@@ -139,6 +146,8 @@ def test_preview_does_not_import_model_or_launch_process(tmp_path, monkeypatch, 
             str(tmp_path / "unstaged"),
             "--data-manifest",
             str(tmp_path / "missing.json"),
+            "--qualification-report",
+            str(tmp_path / "missing-qualification.json"),
             "--output-root",
             str(tmp_path / "trials"),
             "--output",
@@ -211,3 +220,122 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
     else:
         with pytest.raises(ValueError, match="differ|same clean"):
             module.verify_report(args, repository=tmp_path)
+
+
+@pytest.mark.parametrize("change", [None, "measurements", "manifest", "weights", "config", "recovery", "incomplete"])
+def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, monkeypatch, change):
+    module, args = load_script(), arguments(tmp_path)
+    args.config = "pi05_libero_b0"
+    identity = {
+        "base_checkpoint_sha256": module.digest(args.weights / "model.safetensors"),
+        "base_conversion_sha256": module.digest(args.weights / "config.json"),
+        "container_image_id": "sha256:fixture",
+        "code_commit": "a" * 40,
+    }
+    qualification = {"identity": identity, "normalization_sha256": "b" * 64}
+    monkeypatch.setattr(module, "_qualified", lambda args: qualification)
+    args.recovery_report = tmp_path / "recovery.json"
+    args.recovery_report.write_text(
+        json.dumps(
+            {
+                "purpose": "full_size_cuda_recovery",
+                "passed": True,
+                "measured_gpu": True,
+                "identity": identity,
+                "microbatch_size": 2,
+                "gradient_checkpointing": False,
+                "data_manifest_sha256": module.digest(args.data_manifest),
+                "normalization_sha256": "b" * 64,
+                "actual_policy_serving": {"passed": True},
+                "exact_resume": {"raw_weights": True, "ema_weights": True, "optimizer_ema_rng_cursor": True},
+                "update_seconds": 1,
+                "checkpoint_seconds": 2,
+            }
+        )
+    )
+    retained = tmp_path / "retained-run"
+    retained.mkdir()
+    checkpoint = retained / "110"
+    checkpoint.mkdir()
+    for filename in ("model.safetensors", "raw_model.safetensors"):
+        (checkpoint / filename).write_bytes(b"published checkpoint")
+    (checkpoint / "potential_metadata.json").write_text(
+        json.dumps(
+            {
+                "run_mode": "profile",
+                "optimizer_updates": 110,
+                "model_sha256": module.digest(checkpoint / "model.safetensors"),
+                "raw_model_sha256": module.digest(checkpoint / "raw_model.safetensors"),
+            }
+        )
+    )
+    metrics = retained / "metrics.jsonl"
+    metrics.write_text(
+        "".join(json.dumps({"optimizer_updates": i, "seconds_per_update": 1.0}) + "\n" for i in range(1, 111))
+    )
+    publications = retained / "checkpoint_metrics.jsonl"
+    publications.write_text(
+        json.dumps({"optimizer_updates": 110, "checkpoint": str(checkpoint), "seconds": 2.0}) + "\n"
+    )
+    manifest = retained / "run_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "source_weights_sha256": identity["base_checkpoint_sha256"],
+                "base_conversion_receipt_sha256": identity["base_conversion_sha256"],
+                "data_manifest_sha256": module.digest(args.data_manifest),
+                "normalization_hash": "b" * 64,
+                "qualification_sha256": module.digest(args.qualification_report),
+                "recovery_sha256": module.digest(args.recovery_report),
+                "container_image_id": identity["container_image_id"],
+                "mode": "profile",
+                "protocol": {
+                    "config": args.config,
+                    "matmul_precision": "highest",
+                    "deterministic": True,
+                    "code_commit": identity["code_commit"],
+                    "microbatch_size": 2,
+                    "gradient_checkpointing": False,
+                },
+            }
+        )
+    )
+    profile = {
+        "mode": "profile",
+        "measured_gpu": True,
+        "valid_training_cost_profile": True,
+        "identity": identity,
+        "completed_updates": 110,
+        "warmup_optimizer_updates": 10,
+        "timed_optimizer_updates": 100,
+        "effective_batch_size": 256,
+        "measurement_source": str(metrics),
+        "measurement_sha256": module.digest(metrics),
+        "run_manifest": str(manifest),
+        "run_manifest_sha256": module.digest(manifest),
+        "checkpoint_measurements": str(publications),
+        "checkpoint_measurements_sha256": module.digest(publications),
+        "qualification_sha256": module.digest(args.qualification_report),
+        "recovery_sha256": module.digest(args.recovery_report),
+        "seconds_per_optimizer_update": {args.config: 1.0},
+        "checkpoint_seconds": [2.0],
+    }
+    args.verify_profile = tmp_path / "canonical-profile-copy.json"
+    if change == "incomplete":
+        profile["timed_optimizer_updates"] = 99
+    args.verify_profile.write_text(json.dumps(profile))
+    changed_paths = {
+        "measurements": metrics,
+        "manifest": manifest,
+        "weights": checkpoint / "model.safetensors",
+        "recovery": args.recovery_report,
+    }
+    if change in changed_paths:
+        changed_paths[change].write_text("changed")
+    if change == "config":
+        args.config = "pi05_libero_b1"
+    if change is None:
+        assert module.verify_profile(args) == profile
+    else:
+        with pytest.raises(ValueError, match="differ|matching"):
+            module.verify_profile(args)

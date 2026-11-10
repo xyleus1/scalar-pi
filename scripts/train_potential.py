@@ -10,6 +10,9 @@ does not provision hardware, download checkpoints, or claim a measured budget
 until it has timed actual complete optimizer updates.
 """
 
+# Capture import/startup cost before loading the Torch runtime.
+# ruff: noqa: E402
+
 import argparse
 import dataclasses
 import hashlib
@@ -26,6 +29,9 @@ import statistics
 import subprocess
 import time
 
+_PROCESS_STARTED_UNIX = time.time()
+_PROCESS_STARTED_WALL = time.perf_counter()
+
 # The official loader uses JAX tree utilities; its GPU runtime is unnecessary.
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -35,6 +41,9 @@ import safetensors.torch
 import torch
 
 from openpi.research.policy_checks import require_staged_tokenizer
+from openpi.research.qualification import can_start_update
+from openpi.research.qualification import verify_qualification
+from openpi.research.qualification import verify_recovery
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training.potential import ResumableBatchSampler
 from openpi.training.potential import cost_forecast
@@ -68,6 +77,15 @@ def parse_args(argv=None):
     parser.add_argument("--profile-updates", type=int, default=0)
     parser.add_argument("--profile-warmup", type=int, default=10)
     parser.add_argument(
+        "--fit-probe", action="store_true", help="Two optimizer/EMA updates without checkpoint publication"
+    )
+    parser.add_argument("--recovery-probe", action="store_true", help="Short isolated save/resume diagnostic")
+    parser.add_argument("--qualification-report", type=Path, required=True)
+    parser.add_argument(
+        "--recovery-report", type=Path, help="Passing selected-batch recovery receipt for profiling/training"
+    )
+    parser.add_argument("--deadline-unix", type=float, default=os.environ.get("SCALAR_PI_DEADLINE_UNIX") or None)
+    parser.add_argument(
         "--hourly-rate", type=float, help="Actual GPU price; required for profiling, otherwise costs remain unknown"
     )
     parser.add_argument("--max-hours", type=float, help="Stop and save at an optimizer boundary after this run time")
@@ -88,10 +106,20 @@ def parse_args(argv=None):
         parser.error("Profiling requires --hourly-rate with your actual GPU price")
     if args.updates is not None and args.updates < 1:
         parser.error("--updates must be positive")
-    if args.max_hours is not None and args.max_hours <= 0:
+    if args.max_hours is not None and (not math.isfinite(args.max_hours) or args.max_hours <= 0):
         parser.error("--max-hours must be positive")
     if args.resume is not None and (args.weights is not None or args.profile_updates):
         parser.error("--resume cannot be combined with --weights or profiling")
+    if args.fit_probe and (args.profile_updates or args.recovery_probe or args.resume or args.updates):
+        parser.error("--fit-probe is a fresh two-update diagnostic")
+    if args.recovery_probe and (args.profile_updates or args.updates not in (1, 2)):
+        parser.error("--recovery-probe requires --updates 1 or 2 and cannot profile")
+    if not args.fit_probe and not args.recovery_probe and args.recovery_report is None:
+        parser.error("Profiling/training requires --recovery-report")
+    if args.deadline_unix is not None and not math.isfinite(args.deadline_unix):
+        parser.error("--deadline-unix must be finite")
+    if args.matmul_precision != "highest" or not args.deterministic:
+        parser.error("The qualified protocol requires highest precision and deterministic execution")
     return args
 
 
@@ -152,10 +180,21 @@ def _append(path, value):
 
 
 def main(argv=None):
+    started_unix = _PROCESS_STARTED_UNIX
+    started_wall = _PROCESS_STARTED_WALL
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    dataset_manifest = prepare_offline_dataset(args.data_manifest)
-    require_staged_tokenizer()
+    deadline = args.deadline_unix
+    if args.max_hours is not None:
+        deadline = min(deadline or float("inf"), started_unix + args.max_hours * 3600)
+    if not can_start_update(deadline, update_seconds=0, checkpoint_seconds=0):
+        raise TimeoutError("Insufficient session time before initialization")
+    mode = (
+        "fit"
+        if args.fit_probe
+        else ("recovery_probe" if args.recovery_probe else ("profile" if args.profile_updates else "training"))
+    )
+    startup = {}
     code = _git_state()
     if not code["commit"] or not code["source_files_sha256"]:
         raise ValueError("Training requires the verified Git checkout mounted at /app")
@@ -169,6 +208,22 @@ def main(argv=None):
         raise RuntimeError("Full pi05 training requires CUDA. Run the lightweight helper tests on CPU.")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise RuntimeError("This higher-derivative reference trainer supports exactly one GPU process")
+    if args.resume:
+        receipt = json.loads((args.resume / "potential_metadata.json").read_text())
+        qualification = verify_qualification(
+            args.qualification_report,
+            base_hash=receipt["base_checkpoint_hash"],
+            conversion_hash=receipt["base_conversion_receipt_sha256"],
+        )
+    else:
+        if args.weights is None:
+            raise ValueError("Fresh runs require --weights")
+        qualification = verify_qualification(args.qualification_report, checkpoint=args.weights)
+    dataset_manifest = prepare_offline_dataset(args.data_manifest)
+    require_staged_tokenizer()
+    startup["validation_seconds"] = time.perf_counter() - started_wall
+    if not can_start_update(deadline, update_seconds=0, checkpoint_seconds=0):
+        raise TimeoutError("Session deadline reached during input validation")
 
     # Imports intentionally remain after CLI parsing and capability checks.
     import jax
@@ -186,7 +241,26 @@ def main(argv=None):
         raise ValueError("Research configs must freeze the VLM and construct FP32 weights")
     if config.ema_decay != 0.999:
         raise ValueError("The reference protocol requires EMA decay 0.999")
-    updates = args.updates or config.num_train_steps
+    data_config = config.data.create(config.assets_dirs, config.model)
+    if data_config.norm_stats is None or data_config.asset_id is None:
+        raise ValueError("LIBERO research training requires explicit normalization assets")
+    norm_json = normalize.serialize_json(data_config.norm_stats)
+    norm_hash = hashlib.sha256(norm_json.encode()).hexdigest()
+    if norm_hash != qualification.get("normalization_sha256"):
+        raise ValueError("Training normalization differs from qualified serving inputs")
+    assets = {f"assets/{data_config.asset_id}/norm_stats.json": norm_json}
+    recovery = None
+    if args.recovery_report is not None:
+        recovery = verify_recovery(
+            args.recovery_report,
+            identity=qualification["identity"],
+            microbatch_size=args.microbatch_size,
+            gradient_checkpointing=args.gradient_checkpointing,
+            data_manifest=args.data_manifest,
+            normalization_hash=norm_hash,
+        )
+    startup["assets_seconds"] = time.perf_counter() - started_wall - sum(startup.values())
+    updates = 2 if args.fit_probe else (args.updates or config.num_train_steps)
     accumulation = config.batch_size // args.microbatch_size
     output = args.output_root / args.config / args.exp_name
     if output.exists() and args.resume is None:
@@ -213,8 +287,8 @@ def main(argv=None):
         )
         if source_metadata is None:
             raise ValueError("Resumption requires research checkpoint metadata")
-        if source_metadata.get("run_mode") == "profile":
-            raise ValueError("Profiling checkpoints are diagnostics; start each research run from pi05_base")
+        if source_metadata.get("run_mode") != mode:
+            raise ValueError("Resume mode differs; diagnostic checkpoints cannot start research training")
     else:
         source_metadata = validate_checkpoint_metadata(
             source,
@@ -257,7 +331,7 @@ def main(argv=None):
         "schedule": schedule,
         "ema_decay": config.ema_decay,
         "matmul_precision": args.matmul_precision,
-        "run_mode": "profile" if args.profile_updates else "training",
+        "run_mode": mode,
         "deterministic": args.deterministic,
         "initialization": config.model.initialization,
         "gradient_checkpointing": args.gradient_checkpointing,
@@ -283,6 +357,7 @@ def main(argv=None):
             action_horizon=config.model.action_horizon,
             action_dim=config.model.action_dim,
             expected_resume_signature=signature,
+            load_weights=False,  # The raw model was already loaded once before dtype/device configuration.
         )
         completed, consumed = state["optimizer_updates"], state["consumed_microbatches"]
         cumulative_seconds = state["training_seconds"]
@@ -290,8 +365,10 @@ def main(argv=None):
             raise ValueError("Checkpoint is not at a complete effective-batch boundary")
     if completed >= updates:
         raise ValueError(f"Checkpoint already has {completed} updates; requested target is {updates}")
+    startup["model_seconds"] = time.perf_counter() - started_wall - sum(startup.values())
+    if not can_start_update(deadline, update_seconds=0, checkpoint_seconds=0):
+        raise TimeoutError("Session deadline reached during model initialization")
 
-    data_config = config.data.create(config.assets_dirs, config.model)
     dataset = data_loader.create_torch_dataset(data_config, config.model.action_horizon, config.model)
     source_dataset = dataset
     while hasattr(source_dataset, "_dataset"):
@@ -325,15 +402,10 @@ def main(argv=None):
         **loader_kwargs,
     )
     iterator = iter(loader)
-    assets = {}
-    if data_config.norm_stats is not None and data_config.asset_id is not None:
-        norm_json = normalize.serialize_json(data_config.norm_stats)
-        assets[f"assets/{data_config.asset_id}/norm_stats.json"] = norm_json
-    else:
-        raise ValueError("LIBERO research training requires explicit normalization assets")
-    norm_hash = hashlib.sha256(norm_json.encode()).hexdigest()
     if args.resume and source_metadata.get("normalization_hash") != norm_hash:
         raise ValueError("Normalization assets changed since the checkpoint")
+    startup["data_seconds"] = time.perf_counter() - started_wall - sum(startup.values())
+    startup["total_seconds"] = time.perf_counter() - started_wall
     manifest = {
         "arguments": vars(args),
         "configuration": dataclasses.asdict(config),
@@ -357,7 +429,11 @@ def main(argv=None):
         "base_conversion_receipt_sha256": sha256_file(source / "config.json") if base_conversion else None,
         "reference_exposure": config.batch_size * config.num_train_steps,
         "requested_exposure": config.batch_size * updates,
-        "mode": "profile" if args.profile_updates else "training",
+        "mode": mode,
+        "startup": startup,
+        "deadline_unix": deadline,
+        "qualification_sha256": sha256_file(args.qualification_report),
+        "recovery_sha256": sha256_file(args.recovery_report) if args.recovery_report else None,
     }
     manifest_path = output / (f"resume_{completed}_manifest.json" if args.resume else "run_manifest.json")
     write_json(manifest_path, manifest)
@@ -386,7 +462,7 @@ def main(argv=None):
         metadata["base_conversion_receipt_sha256"] = source_metadata.get("base_conversion_receipt_sha256")
     target = args.profile_warmup + args.profile_updates if args.profile_updates else updates
     timings = []
-    start_wall = time.perf_counter()
+    all_update_seconds = []
     last_saved = completed
     checkpoint_seconds = []
     stop_requested = False
@@ -402,7 +478,7 @@ def main(argv=None):
 
     def persist():
         nonlocal last_saved
-        if completed == last_saved:
+        if args.fit_probe or completed == last_saved:
             return
         checkpoint_start = time.perf_counter()
         checkpoint = save_checkpoint(
@@ -443,6 +519,15 @@ def main(argv=None):
         )
 
     while completed < target:
+        # Diagnostics establish the first measurements. Later profiles/research
+        # must already have measured update and publication costs from recovery.
+        update_estimate = max([recovery["update_seconds"] if recovery else 0, *all_update_seconds])
+        save_estimate = max([recovery["checkpoint_seconds"] if recovery else 0, *checkpoint_seconds])
+        if stop_requested or not can_start_update(
+            deadline, update_seconds=update_estimate, checkpoint_seconds=0 if args.fit_probe else save_estimate
+        ):
+            logging.warning("Stopping before an update to preserve checkpoint and shutdown time")
+            break
         torch.cuda.synchronize(device)
         tick = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
@@ -478,8 +563,11 @@ def main(argv=None):
         consumed += accumulation
         torch.cuda.synchronize(device)
         elapsed = time.perf_counter() - tick
+        all_update_seconds.append(elapsed)
         cumulative_seconds += elapsed
-        if not args.profile_updates or completed > args.profile_warmup:
+        if (args.fit_probe and completed > 1) or (
+            not args.fit_probe and (not args.profile_updates or completed > args.profile_warmup)
+        ):
             timings.append(elapsed)
         record = {
             "optimizer_updates": completed,
@@ -496,22 +584,24 @@ def main(argv=None):
         _append(output / "metrics.jsonl", record)
         if completed % config.log_interval == 0 or completed == 1:
             logging.info("update=%d loss=%.5f lr=%.3g seconds=%.3f", completed, loss_total, rate, elapsed)
-        if not args.profile_updates and completed % args.save_every == 0:
+        if not args.profile_updates and not args.fit_probe and completed % args.save_every == 0:
             persist()
-        if stop_requested or (args.max_hours is not None and time.perf_counter() - start_wall >= args.max_hours * 3600):
-            logging.warning("Run time limit reached; saving a partial run at an optimizer boundary")
-            break
     persist()  # Profiles also measure one complete checkpoint publication.
     if timings:
         mean_seconds = statistics.mean(timings)
         report = {
             "measured_gpu": True,
             "model_kind": "pi05_full",
+            "valid_training_cost_profile": bool(args.profile_updates and completed == target),
+            "fit_probe_passed": args.fit_probe and completed == 2,
             "hourly_rate_usd": args.hourly_rate,
             "hardware": torch.cuda.get_device_name(device),
             "measurement_source": str(output / "metrics.jsonl"),
+            "measurement_sha256": sha256_file(output / "metrics.jsonl"),
+            "run_manifest": str(manifest_path),
+            "run_manifest_sha256": sha256_file(manifest_path),
             "effective_batch_size": config.batch_size,
-            "warmup_optimizer_updates": args.profile_warmup if args.profile_updates else 0,
+            "warmup_optimizer_updates": 1 if args.fit_probe else (args.profile_warmup if args.profile_updates else 0),
             "timed_optimizer_updates": len(timings),
             "seconds_per_optimizer_update": {args.config: mean_seconds},
             "mode": manifest["mode"],
@@ -528,6 +618,14 @@ def main(argv=None):
             "checkpoint_seconds": checkpoint_seconds,
             "total_memory_bytes": torch.cuda.get_device_properties(device).total_memory,
             "checkpoint_measurements": str(output / "checkpoint_metrics.jsonl"),
+            "checkpoint_measurements_sha256": (
+                sha256_file(output / "checkpoint_metrics.jsonl") if checkpoint_seconds else None
+            ),
+            "startup": startup,
+            "elapsed_session_seconds": time.perf_counter() - started_wall,
+            "qualification_sha256": manifest["qualification_sha256"],
+            "recovery_sha256": manifest["recovery_sha256"],
+            "identity": qualification["identity"],
             "forecast_one_reference_run": cost_forecast(mean_seconds, config.num_train_steps, args.hourly_rate),
             "forecast_three_same_method_seeds": cost_forecast(
                 mean_seconds, config.num_train_steps, args.hourly_rate, runs=3
@@ -542,6 +640,8 @@ def main(argv=None):
         }
         write_json(output / "profile.json", report)
         logging.info("Measured forecast: %s", json.dumps(report))
+    if (args.fit_probe or args.recovery_probe or args.profile_updates) and completed != target:
+        raise TimeoutError("Diagnostic/profile did not complete before the session deadline; evidence is incomplete")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,14 @@
+{
+  "output_dir": "/lambda/nfs/scalar-pi/data/experiments/calibration/REPLACE_ATTEMPT",
+  "corpus": "/lambda/nfs/scalar-pi/data/policy_corpus.npz",
+  "smoke_manifest": "/lambda/nfs/scalar-pi/data/experiments/reports/smoke/REPLACE_SESSION/matrix.json",
+  "policy_command_prefix": ["bash", "/lambda/nfs/scalar-pi/repo/scripts/lambda/run.sh", "model", "--execute", "python", "scripts/benchmark_potential.py"],
+  "simulator_command_prefix": ["bash", "/lambda/nfs/scalar-pi/repo/scripts/lambda/run.sh", "simulator", "--execute"],
+  "policies": [
+    {"group": "B0", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_VERIFIED_B0_PROFILE_CHECKPOINT"},
+    {"group": "B1", "config": "pi05_libero_b1", "checkpoint_dir": "REPLACE_WITH_VERIFIED_B1_PROFILE_CHECKPOINT"},
+    {"group": "P", "config": "pi05_libero_potential", "checkpoint_dir": "REPLACE_WITH_VERIFIED_P_PROFILE_CHECKPOINT"},
+    {"group": "reference", "config": "pi05_libero", "checkpoint_dir": "/lambda/nfs/scalar-pi/data/openpi-cache/openpi-assets/checkpoints/pi05_libero",
+     "command_prefix": ["bash", "/lambda/nfs/scalar-pi/repo/scripts/lambda/run.sh", "model-jax", "--execute", "python", "scripts/benchmark_potential.py"]}
+  ]
+}

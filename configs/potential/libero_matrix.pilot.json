@@ -22,7 +22,8 @@
     "paired_noise_seed":  7,
     "output_dir":  "results/potential-pilot",
     "port":  8000,
-    "save_videos":  true,
+    "save_videos":  false,
+    "task_shards": true,
     "server_command_prefix":  [
                                   "uv",
                                   "run",

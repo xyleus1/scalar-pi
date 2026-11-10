@@ -8,9 +8,11 @@ import argparse
 import json
 import os
 from pathlib import Path
+import time
 
 import numpy as np
 
+from openpi.research.evaluation import source_identity
 from openpi.research.policy_checks import corpus_observation
 from openpi.research.policy_checks import file_digest
 from openpi.research.policy_checks import load_corpus
@@ -18,7 +20,7 @@ from openpi.research.policy_checks import require_staged_tokenizer
 from openpi.research.policy_checks import timing_summary
 
 
-def measure_calls(policy, corpus, *, warmup: int, calls: int, synchronize, reset_peak):
+def measure_calls(policy, corpus, *, warmup: int, calls: int, synchronize, reset_peak, startup=None):
     if warmup < 1 or calls < 1:
         raise ValueError("Warmup and measured call counts must be positive")
     samples = []
@@ -30,8 +32,11 @@ def measure_calls(policy, corpus, *, warmup: int, calls: int, synchronize, reset
         # Measured calls always start at corpus item zero, independently of warmup.
         sample_index = (index if index < warmup else index - warmup) % count
         synchronize()
+        started = time.perf_counter()
         output = policy.infer(corpus_observation(corpus, sample_index), noise=corpus["noise"][sample_index])
         synchronize()
+        if index == 0 and startup is not None:
+            startup["first_query_seconds"] = time.perf_counter() - started
         if output.get("policy_error") or not np.isfinite(output["actions"]).all():
             raise RuntimeError(f"Policy produced invalid actions during timing: {output.get('policy_error')}")
         if index >= warmup:
@@ -61,6 +66,7 @@ def main(argv=None):
     from openpi.policies.policy_config import create_trained_policy
     from openpi.training.config import get_config
 
+    loading_started = time.perf_counter()
     policy = create_trained_policy(
         get_config(args.config), args.checkpoint, sample_kwargs={"num_steps": args.num_steps}, pytorch_device="cuda:0"
     )
@@ -85,8 +91,16 @@ def main(argv=None):
         def reset_peak():
             pass
 
+    synchronize()
+    startup = {"model_load_seconds": time.perf_counter() - loading_started}
     samples = measure_calls(
-        policy, corpus, warmup=args.warmup, calls=args.calls, synchronize=synchronize, reset_peak=reset_peak
+        policy,
+        corpus,
+        warmup=args.warmup,
+        calls=args.calls,
+        synchronize=synchronize,
+        reset_peak=reset_peak,
+        startup=startup,
     )
     if policy.metadata["runtime"]["backend"] == "pytorch":
         memory = {
@@ -102,6 +116,7 @@ def main(argv=None):
         "valid_training_cost_profile": False,
         "valid_benchmark_evaluation": False,
         "policy": policy.metadata,
+        "source": source_identity(Path(__file__).resolve().parents[1]),
         "corpus_sha256": file_digest(args.corpus),
         "corpus_observations": len(corpus["states"]),
         "warmup_calls": args.warmup,
@@ -112,6 +127,7 @@ def main(argv=None):
         "num_steps": args.num_steps,
         "summary": timing_summary(samples),
         "memory": memory,
+        "startup": startup,
         "calls": samples,
         "limitations": ["Requires an otherwise idle GPU; native JAX versus eager Torch is a system comparison."],
     }

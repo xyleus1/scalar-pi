@@ -1,13 +1,15 @@
-# ruff: noqa: UP007 -- Optional annotations must work at runtime in the Python 3.8 simulator.
+# ruff: noqa: UP006, UP007, UP035 -- Runtime annotations must support the Python 3.8 simulator.
 import collections
 import dataclasses
 import hashlib
+import json
 import logging
 import math
+import os
 import pathlib
 import sys
 import time
-from typing import Optional
+from typing import List, Optional
 
 import imageio
 from libero.libero import benchmark
@@ -63,6 +65,16 @@ class Args:
     save_videos: bool = True
     require_provenance: bool = False
     attempt_id: str = "initial"
+    task_shards: bool = False
+    task_ids: Optional[List[int]] = None
+    task_attempts: str = "{}"  # JSON mapping original task IDs to explicit attempt names.
+    deadline_unix: Optional[float] = None
+    task_budget_seconds: Optional[float] = None
+    cleanup_seconds: float = 600.0
+    metadata_timeout_seconds: float = 60.0
+    inference_timeout_seconds: float = 120.0
+    cold_inference_timeout_seconds: float = 900.0
+    calibration_output: Optional[str] = None
 
 
 class InvalidPolicyActionsError(ValueError):
@@ -71,13 +83,16 @@ class InvalidPolicyActionsError(ValueError):
 
 def eval_libero(args: Args) -> None:
     research = None
-    if args.episode_log_path is not None or args.paired_noise_seed is not None:
+    if args.episode_log_path is not None or args.paired_noise_seed is not None or args.calibration_output is not None:
         # The official simulator uses its own Python 3.8 environment. Only this
         # dependency-free subpackage is needed, not the model training environment.
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
         from openpi.research import evaluation
 
         research = evaluation
+    if args.calibration_output is not None:
+        calibrate_scenes(args, research)
+        return
     if args.episode_log_path is not None and pathlib.Path(args.episode_log_path).exists():
         raise FileExistsError(f"Refusing to append a second run to {args.episode_log_path}")
     # Set random seed
@@ -92,6 +107,33 @@ def eval_libero(args: Args) -> None:
             raise ValueError("max_tasks must be between 1 and the number of suite tasks")
         num_tasks_in_suite = args.max_tasks
     logging.info(f"Task suite: {args.task_suite_name}")
+    task_ids = list(range(num_tasks_in_suite)) if args.task_ids is None else args.task_ids
+    if (
+        not task_ids
+        or len(set(task_ids)) != len(task_ids)
+        or any(not 0 <= task < num_tasks_in_suite for task in task_ids)
+    ):
+        raise ValueError("task_ids must contain unique original suite task IDs")
+    attempts = json.loads(args.task_attempts)
+    if not isinstance(attempts, dict):
+        raise ValueError("task_attempts must be a JSON object")
+    if args.task_shards and args.episode_log_path is None:
+        raise ValueError("Task shards require the canonical suite log path")
+    deadline = (
+        args.deadline_unix
+        if args.deadline_unix is not None
+        else float(os.environ.get("SCALAR_PI_DEADLINE_UNIX") or "inf")
+    )
+    if math.isnan(deadline) or deadline <= 0:
+        raise ValueError("Invalid absolute rollout deadline")
+    if not math.isfinite(args.cleanup_seconds) or args.cleanup_seconds < 600:
+        raise ValueError("Reserve at least 600 seconds for cleanup")
+    if args.task_budget_seconds is not None and (
+        not math.isfinite(args.task_budget_seconds) or args.task_budget_seconds <= 0
+    ):
+        raise ValueError("Task time budget must be finite and positive")
+    if math.isfinite(deadline) and args.task_budget_seconds is None:
+        raise ValueError("Deadline-bound rollouts require a calibrated whole-task budget")
 
     pathlib.Path(args.video_out_path).mkdir(parents=True, exist_ok=True)
 
@@ -108,7 +150,13 @@ def eval_libero(args: Args) -> None:
     else:
         raise ValueError(f"Unknown task suite: {args.task_suite_name}")
 
-    client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
+    client = _websocket_client_policy.WebsocketClientPolicy(
+        args.host,
+        args.port,
+        metadata_timeout=args.metadata_timeout_seconds,
+        inference_timeout=args.inference_timeout_seconds,
+        cold_inference_timeout=args.cold_inference_timeout_seconds,
+    )
     server_metadata = client.get_server_metadata()
     if args.episode_log_path is not None:
         for key, expected in {
@@ -120,6 +168,7 @@ def eval_libero(args: Args) -> None:
                 raise ValueError(f"Server {key}={server_metadata.get(key)!r}, expected {expected!r}")
 
     provenance_sha256 = None
+    provenance = None
     if args.require_provenance:
         if args.episode_log_path is None:
             raise ValueError("Provenance requires an episode log")
@@ -168,11 +217,35 @@ def eval_libero(args: Args) -> None:
                 "provenance_sha256": research.content_digest(provenance),
             }
         )
-        provenance_sha256 = research.write_provenance(args.episode_log_path, provenance)
+        provenance_sha256 = research.content_digest(provenance)
+        if not args.task_shards:
+            research.write_provenance(args.episode_log_path, provenance)
 
     # Start evaluation
     total_episodes, total_successes = 0, 0
-    for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
+    for task_id in tqdm.tqdm(task_ids):
+        if time.time() + (args.task_budget_seconds or 0) + args.cleanup_seconds >= deadline:
+            logging.info("Stopping at a task boundary before the lease deadline")
+            return
+        task_attempt = attempts.get(str(task_id), "initial")
+        if (
+            not isinstance(task_attempt, str)
+            or task_attempt in {"", ".", ".."}
+            or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in task_attempt)
+        ):
+            raise ValueError("Task attempt must be a safe identifier")
+        episode_log_path = args.episode_log_path
+        if args.task_shards:
+            episode_log_path = research.task_log_path(
+                {"episode_log_path": args.episode_log_path}, task_id, task_attempt
+            )
+            if (
+                pathlib.Path(episode_log_path).exists()
+                or pathlib.Path(episode_log_path).with_suffix(".provenance.json").exists()
+            ):
+                raise FileExistsError(f"Refusing to replace task attempt {episode_log_path}")
+            if provenance is not None:
+                research.write_provenance(episode_log_path, provenance)
         # Get task
         task = task_suite.get_task(task_id)
 
@@ -238,7 +311,8 @@ def eval_libero(args: Args) -> None:
                     )
 
                     # Save preprocessed image for replay video
-                    replay_images.append(img)
+                    if args.save_videos:
+                        replay_images.append(img)
 
                     if not action_plan:
                         # Finished executing previous action chunk -- compute new chunk
@@ -339,7 +413,7 @@ def eval_libero(args: Args) -> None:
 
             if args.episode_log_path is not None:
                 research.append_episode(
-                    args.episode_log_path,
+                    episode_log_path,
                     {
                         "schema_version": 1,
                         "protocol_id": research.PROTOCOL_ID,
@@ -374,6 +448,7 @@ def eval_libero(args: Args) -> None:
                         "server_metadata": server_metadata,
                         "provenance_sha256": provenance_sha256,
                         "attempt_id": args.attempt_id,
+                        "task_attempt_id": task_attempt,
                     },
                 )
                 if failure_kind == "infrastructure":
@@ -392,6 +467,132 @@ def eval_libero(args: Args) -> None:
 
     logging.info(f"Total success rate: {float(total_successes) / float(total_episodes)}")
     logging.info(f"Total episodes: {total_episodes}")
+
+
+def calibrate_scenes(args, research):
+    """Time native LIBERO components in every scene; these are never scored episodes."""
+    output = pathlib.Path(args.calibration_output)
+    if output.exists():
+        raise FileExistsError(f"Calibration evidence already exists: {output}")
+    if args.task_suite_name not in research.SUITES or args.resize_size != 224 or args.num_steps_wait != 10:
+        raise ValueError("Calibration requires the native four-suite rendering protocol")
+    if not math.isfinite(args.cleanup_seconds) or args.cleanup_seconds < 600:
+        raise ValueError("Calibration requires at least 600 seconds of shutdown reserve")
+    started = time.perf_counter()
+    suite = benchmark.get_benchmark_dict()[args.task_suite_name]()
+    if suite.n_tasks != 10:
+        raise ValueError("Calibration must cover all ten task scenes")
+    deadline = (
+        args.deadline_unix
+        if args.deadline_unix is not None
+        else float(os.environ.get("SCALAR_PI_DEADLINE_UNIX") or "inf")
+    )
+    if math.isnan(deadline) or deadline <= 0:
+        raise ValueError("Invalid absolute calibration deadline")
+    tasks, assets = [], []
+    for task_id in range(10):
+        if time.time() + args.cleanup_seconds >= deadline:
+            raise TimeoutError("Calibration deadline reached; incomplete evidence was not published")
+        task = suite.get_task(task_id)
+        state = suite.get_task_init_states(task_id)[0]
+        before = time.perf_counter()
+        env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed)
+        creation = time.perf_counter() - before
+        resets, steps, preprocessing = [], [], []
+        try:
+
+            def reset(env=env, state=state, resets=resets):
+                tick = time.perf_counter()
+                env.reset()
+                observation = env.set_init_state(state)
+                resets.append(time.perf_counter() - tick)
+                return observation
+
+            obs = reset()
+            initial_observation = {key: np.asarray(value).copy() for key, value in obs.items()}
+            initial_rng = np.random.get_state()
+            for step in range(research.MAX_STEPS[args.task_suite_name] + args.num_steps_wait):
+                if time.time() + args.cleanup_seconds >= deadline:
+                    raise TimeoutError("Calibration deadline reached during a scene")
+                tick = time.perf_counter()
+                obs, _, done, _ = env.step(LIBERO_DUMMY_ACTION)
+                steps.append(time.perf_counter() - tick)
+                if step >= args.num_steps_wait:
+                    tick = time.perf_counter()
+                    for camera in ("agentview_image", "robot0_eye_in_hand_image"):
+                        image_tools.convert_to_uint8(
+                            image_tools.resize_with_pad(
+                                np.ascontiguousarray(obs[camera][::-1, ::-1]), args.resize_size, args.resize_size
+                            )
+                        )
+                    preprocessing.append(time.perf_counter() - tick)
+                if done:
+                    obs = reset()
+        finally:
+            env.close()
+        # A standalone task process starts with this same explicit seed. Verify
+        # constructor/reset behavior before allowing task-boundary recovery.
+        np.random.seed(args.seed)
+        standalone, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed)
+        try:
+            standalone.reset()
+            isolated = standalone.set_init_state(state)
+            isolated_rng = np.random.get_state()
+            if initial_observation.keys() != isolated.keys() or any(
+                not np.array_equal(value, np.asarray(isolated[key])) for key, value in initial_observation.items()
+            ):
+                raise ValueError(f"Task {task_id} standalone initialization differs from contiguous execution")
+            if any(not np.array_equal(left, right) for left, right in zip(initial_rng, isolated_rng)):  # noqa: B905 -- Python 3.8.
+                raise ValueError(f"Task {task_id} standalone reset RNG differs")
+        finally:
+            standalone.close()
+        tasks.append(
+            {
+                "task_id": task_id,
+                "task_start_parity": True,
+                "create_seconds": creation,
+                "reset_seconds": max(resets),
+                "settling_seconds": sum(steps[: args.num_steps_wait]),
+                "step_seconds_p95": float(np.percentile(steps[args.num_steps_wait :], 95)),
+                "preprocess_seconds_p95": float(np.percentile(preprocessing, 95)),
+                "measured_steps": len(steps),
+                "step_seconds": steps,
+                "preprocess_seconds": preprocessing,
+            }
+        )
+        bddl = pathlib.Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
+        assets.append(
+            {
+                "task_id": task_id,
+                "bddl_sha256": research.file_digest(bddl),
+                "initial_states_sha256": [hashlib.sha256(np.asarray(state).tobytes()).hexdigest()],
+            }
+        )
+    provenance_started = time.perf_counter()
+    provenance = research.suite_provenance(
+        server_metadata={},
+        settings={"suite": args.task_suite_name},
+        tasks=assets,
+        simulator_paths={name: get_libero_path(name) for name in ("bddl_files", "init_states", "assets")},
+    )
+    report = {
+        "schema_version": 1,
+        "purpose": "libero_scene_timing",
+        "valid_benchmark_evaluation": False,
+        "suite": args.task_suite_name,
+        "render_size": 256,
+        "resize_size": 224,
+        "num_steps_wait": 10,
+        "max_steps": research.MAX_STEPS[args.task_suite_name],
+        "tasks": tasks,
+        "provenance": provenance,
+        "process_seconds": time.perf_counter() - started,
+        "provenance_seconds": time.perf_counter() - provenance_started,
+        "scope": "Full native step counts with dummy actions; component timing, not policy outcomes",
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("x", encoding="utf-8") as stream:
+        json.dump(report, stream, indent=2, allow_nan=False)
 
 
 def _get_libero_env(task, resolution, seed):

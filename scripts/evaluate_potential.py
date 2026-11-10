@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -21,17 +22,7 @@ from openpi.research import evaluation
 
 def _validate_suite_log(manifest: dict, checkpoint_id: str, steps: int, suite: str, path: str) -> dict:
     """Use a diagnostic validation *view*, without relaxing the original matrix."""
-    variant = next(v for v in manifest["variants"] if v["checkpoint_id"] == checkpoint_id)
-    cell_key = f"{checkpoint_id}/k{steps}/{suite}"
-    subset = {
-        **manifest,
-        "diagnostic": True,
-        "variants": [variant],
-        "num_steps": [steps],
-        "suites": [suite],
-        "require_provenance": manifest.get("require_provenance", not manifest.get("diagnostic", False)),
-        "suite_attempts": {key: value for key, value in manifest.get("suite_attempts", {}).items() if key == cell_key},
-    }
+    subset = evaluation.suite_manifest(manifest, {"checkpoint_id": checkpoint_id, "num_steps": steps, "suite": suite})
     try:
         return evaluation.validate_results(
             evaluation.read_episodes([path]),
@@ -79,6 +70,7 @@ def commands(manifest: dict, *, resume_completed_suites: bool = False) -> list[d
                 "server": server,
                 "clients": [],
                 "completed_suites": [],
+                "aggregates": [],
             }
         if Path(cell["episode_log_path"]).exists():
             if not resume_completed_suites:
@@ -90,6 +82,22 @@ def commands(manifest: dict, *, resume_completed_suites: bool = False) -> list[d
                 {"suite": cell["suite"], "log": cell["episode_log_path"], **validation}
             )
             continue
+        pending_tasks = list(range(manifest.get("num_tasks_per_suite", 10)))
+        if manifest.get("task_shards", False):
+            pending_tasks = []
+            for task in range(manifest.get("num_tasks_per_suite", 10)):
+                path = Path(evaluation.task_log_path(cell, task, evaluation.task_attempt(manifest, cell, task)))
+                if path.exists():
+                    if not resume_completed_suites:
+                        raise FileExistsError(f"Existing task log {path}; use --resume-completed-suites")
+                    evaluation.validate_task_log(manifest, cell, task, path)
+                elif path.with_suffix(".provenance.json").exists():
+                    raise ValueError(f"Interrupted empty task attempt {path}; select a fresh task_attempts entry")
+                else:
+                    pending_tasks.append(task)
+            if not pending_tasks:
+                batches[key]["aggregates"].append(cell)
+                continue
         client = [
             *client_prefix,
             "--args.host",
@@ -131,7 +139,32 @@ def commands(manifest: dict, *, resume_completed_suites: bool = False) -> list[d
             client.append("--args.no-save-videos")
         if manifest.get("num_tasks_per_suite", 10) != 10:
             client.extend(["--args.max-tasks", str(manifest["num_tasks_per_suite"])])
-        batches[key]["clients"].append({"suite": cell["suite"], "argv": client, "log": cell["episode_log_path"]})
+        if manifest.get("task_shards", False):
+            attempts = {str(task): evaluation.task_attempt(manifest, cell, task) for task in pending_tasks}
+            client.extend(
+                [
+                    "--args.task-shards",
+                    "--args.task-ids",
+                    *map(str, pending_tasks),
+                    "--args.task-attempts",
+                    json.dumps(attempts),
+                ]
+            )
+        for key_name, default in (
+            ("metadata_timeout_seconds", 60),
+            ("inference_timeout_seconds", 120),
+            ("cold_inference_timeout_seconds", 900),
+        ):
+            client.extend(["--args." + key_name.replace("_", "-"), str(manifest.get(key_name, default))])
+        batches[key]["clients"].append(
+            {
+                "suite": cell["suite"],
+                "argv": client,
+                "log": cell["episode_log_path"],
+                "cell": cell,
+                "task_ids": pending_tasks,
+            }
+        )
     for batch in batches.values():
         batch["status"] = "pending" if batch["clients"] else "complete"
     return list(batches.values())
@@ -174,9 +207,15 @@ def _run_client(argv: list[str], *, cwd: Path, env: dict, timeout: float) -> Non
 
 def execute(manifest: dict, *, resume_completed_suites: bool = False) -> None:
     root = Path(__file__).resolve().parents[1]
+    if manifest.get("timing_report"):
+        calibration = evaluation.verify_timing_report(manifest["timing_report"])
+        manifest = {"server_start_budget_seconds": calibration["server_start_budget_seconds"], **manifest}
     port = int(manifest.get("port", 8000))
     # Recheck disk state at execution time, including logs validated in the dry-run plan.
     batches = commands(manifest, resume_completed_suites=resume_completed_suites)
+    for batch in batches:
+        for cell in batch["aggregates"]:
+            evaluation.aggregate_tasks(manifest, cell)
     pending_batches = [batch for batch in batches if batch["clients"]]
     pending_ids = {batch["checkpoint_id"] for batch in pending_batches}
     if any(
@@ -193,7 +232,26 @@ def execute(manifest: dict, *, resume_completed_suites: bool = False) -> None:
             pass
     env = os.environ.copy()
     env["PYTHONPATH"] = str(root / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    deadline = float(os.environ.get("SCALAR_PI_DEADLINE_UNIX") or "inf")
+    if math.isnan(deadline) or deadline <= 0:
+        raise ValueError("Invalid absolute evaluation deadline")
+    cleanup = float(manifest.get("cleanup_seconds", 600))
+    if not math.isfinite(cleanup) or cleanup < 600:
+        raise ValueError("Reserve at least 600 seconds for container cleanup")
+
+    def defer():
+        print(json.dumps({"status": "deferred", "reason": "Next complete task does not fit before the lease deadline"}))
+
     for batch in pending_batches:
+        first = batch["clients"][0]
+        if math.isfinite(deadline):
+            budget = evaluation.task_budget_seconds(manifest, first["cell"])
+            startup = float(manifest.get("server_start_budget_seconds", 900))
+            if not math.isfinite(startup) or startup <= 0:
+                raise ValueError("A finite positive server startup allowance is required")
+            if time.time() + startup + budget + cleanup >= deadline:
+                defer()
+                return
         server_log = (
             Path(manifest.get("output_dir", "results/potential"))
             / batch["checkpoint_id"]
@@ -211,12 +269,40 @@ def execute(manifest: dict, *, resume_completed_suites: bool = False) -> None:
                 for client in batch["clients"]:
                     if server.poll() is not None:
                         raise RuntimeError("Policy server exited before the next suite")
+                    argv = list(client["argv"])
+                    timeout = float(manifest.get("suite_timeout_seconds", 86400))
+                    if math.isfinite(deadline):
+                        budget = evaluation.task_budget_seconds(manifest, client["cell"])
+                        if time.time() + budget + cleanup >= deadline:
+                            defer()
+                            return
+                        argv.extend(
+                            [
+                                "--args.deadline-unix",
+                                str(deadline),
+                                "--args.task-budget-seconds",
+                                str(budget),
+                                "--args.cleanup-seconds",
+                                str(cleanup),
+                            ]
+                        )
+                        timeout = min(timeout, deadline - time.time() - cleanup)
                     _run_client(
-                        client["argv"],
+                        argv,
                         cwd=root,
                         env=env,
-                        timeout=float(manifest.get("suite_timeout_seconds", 86400)),
+                        timeout=timeout,
                     )
+                    if manifest.get("task_shards", False):
+                        for task in client["task_ids"]:
+                            path = evaluation.task_log_path(
+                                client["cell"], task, evaluation.task_attempt(manifest, client["cell"], task)
+                            )
+                            if not Path(path).exists():
+                                defer()
+                                return
+                            evaluation.validate_task_log(manifest, client["cell"], task, path)
+                        evaluation.aggregate_tasks(manifest, client["cell"])
                     _validate_suite_log(
                         manifest, batch["checkpoint_id"], batch["num_steps"], client["suite"], client["log"]
                     )

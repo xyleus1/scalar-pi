@@ -11,9 +11,16 @@ case "$study" in
     *) echo 'No affordable complete study has been selected.' >&2; exit 1 ;;
 esac
 selection="$data/experiments/batch_selection.json"
+qualification=/data/experiments/reports/gpu_qualification.json
+recovery=/data/experiments/reports/recovery.json
 bash scripts/lambda/run.sh model --execute python scripts/select_potential_batch.py \
     --checkpoint /data/weights/pi05_base_torch --data-manifest /data/libero_manifest.json \
+    --qualification-report "$qualification" \
     --verify-report /data/experiments/batch_selection.json
+bash scripts/lambda/run.sh model --execute python scripts/qualify_potential_recovery.py \
+    --checkpoint /data/weights/pi05_base_torch --data-manifest /data/libero_manifest.json \
+    --selection /data/experiments/batch_selection.json --qualification-report "$qualification" \
+    --corpus /data/policy_corpus.npz --verify-report "$recovery"
 batch="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["microbatch_size"])' "$selection")"
 checkpointing="$(python3 -c 'import json,sys; print("--gradient-checkpointing" if json.load(open(sys.argv[1]))["gradient_checkpointing"] else "--no-gradient-checkpointing")' "$selection")"
 for seed in "${seeds[@]}"; do
@@ -26,11 +33,21 @@ for seed in "${seeds[@]}"; do
             bash scripts/lambda/run.sh model --execute python scripts/lambda/verify_training.py \
                 --checkpoint "$directory/30000" --config "$config" --seed "$seed" \
                 --selection /data/experiments/batch_selection.json \
-                --weights /data/weights/pi05_base_torch --data-manifest /data/libero_manifest.json
+                --weights /data/weights/pi05_base_torch --data-manifest /data/libero_manifest.json \
+                --qualification-report "$qualification"
             continue
         fi
-        remaining="$(python3 -c 'import os,time; print(max(0,(float(os.environ["SCALAR_PI_DEADLINE_UNIX"])-time.time()-600)/3600))')"
-        if ! python3 -c 'import sys; sys.exit(0 if float(sys.argv[1])>0 else 1)' "$remaining"; then exit 0; fi
+        admission="$(python3 - "$report" "$group" <<'PY'
+import json, os, sys, time
+report = json.load(open(sys.argv[1]))
+budget = report.get("budget", report)
+group = sys.argv[2].upper()
+required = (budget["startup_seconds_per_session"] + budget["checkpoint_seconds_per_save"][group]
+            + budget["seconds_per_optimizer_update"][group] + budget["shutdown_reserve_seconds"])
+print("start" if float(os.environ["SCALAR_PI_DEADLINE_UNIX"]) - time.time() > required else "stop")
+PY
+)"
+        if [[ "$admission" != start ]]; then exit 0; fi
         save_every="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("budget",d)["checkpoint_interval_updates"][sys.argv[2].upper()])' "$report" "$group")"
         latest="$(python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); ds=[d for d in p.glob("*") if d.name.isdigit() and (d/"training_state.pt").is_file()]; print(max(ds,key=lambda d:int(d.name)) if ds else "")' "$directory")"
         if [[ -d "$directory" && -z "$latest" ]]; then
@@ -46,7 +63,8 @@ for seed in "${seeds[@]}"; do
         bash scripts/lambda/run.sh model --execute python scripts/train_potential.py "$config" \
             --exp-name "$run" "${source[@]}" --output-root /data/experiments/checkpoints \
             --data-manifest /data/libero_manifest.json --microbatch-size "$batch" "$checkpointing" \
-            --seed "$seed" --save-every "$save_every" --max-hours "$remaining" \
+            --qualification-report "$qualification" --recovery-report "$recovery" \
+            --seed "$seed" --save-every "$save_every" --deadline-unix "${SCALAR_PI_DEADLINE_UNIX:?}" \
             --hourly-rate "${SCALAR_PI_HOURLY_RATE_USD:?}"
         if [[ ! -f "$directory/30000/potential_metadata.json" ]]; then exit 0; fi
     done

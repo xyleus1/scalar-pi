@@ -26,30 +26,55 @@ fi
 [[ -z "$(git -C "$repo" status --porcelain)" ]] || { echo 'Commit source changes before execution.' >&2; exit 1; }
 mkdir -p "$data/experiments" "$root/images"
 cd "$repo"
+python3 scripts/lambda/canary.py verify --root "$root"
+archive="$root/images/$commit.tar.gz"
+receipt="$root/images/$commit.images.json"
+archive_verified=false
 
 if [[ "$phase" == build ]]; then
-    git submodule update --init --recursive
-    "${docker[@]}" build -f scripts/docker/train_potential.Dockerfile -t "$model" .
-    "${docker[@]}" build -f examples/libero/Dockerfile -t "$simulator" .
-    # Instances are disposable; retain the exact images on the project filesystem.
-    archive="$root/images/$commit.tar.gz"
-    "${docker[@]}" image save "$model" "$simulator" | gzip -1 > "$archive.tmp"
-    mv -- "$archive.tmp" "$archive"
-    exit 0
+    if [[ -f "$archive" && ! -e "$receipt" ]]; then
+        # A prior lease ended between archive and receipt publication. Preserve
+        # the unverified archive instead of treating it as a completed build.
+        interrupted="$archive.interrupted-${SCALAR_PI_ATTEMPT:?Use the Lambda controller}"
+        [[ ! -e "$interrupted" ]] || { echo 'Interrupted image archive already exists.' >&2; exit 1; }
+        mv -- "$archive" "$interrupted"
+    fi
+    if [[ ! -e "$archive" && ! -e "$receipt" ]]; then
+        git submodule update --init --recursive
+        "${docker[@]}" build -f scripts/docker/train_potential.Dockerfile -t "$model" .
+        "${docker[@]}" build -f examples/libero/Dockerfile -t "$simulator" .
+        "${docker[@]}" image save "$model" "$simulator" | gzip -1 > "$archive.tmp"
+        mv -- "$archive.tmp" "$archive"
+        python3 scripts/lambda/images.py record --receipt "$receipt" --archive "$archive" --commit "$commit" \
+            --model-id "$("${docker[@]}" image inspect --format '{{.Id}}' "$model")" \
+            --simulator-id "$("${docker[@]}" image inspect --format '{{.Id}}' "$simulator")"
+    else
+        python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
+    fi
+    archive_verified=true
 fi
 
 if ! "${docker[@]}" image inspect "$model" "$simulator" >/dev/null 2>&1; then
-    [[ -f "$root/images/$commit.tar.gz" ]] || { echo 'Run the build phase first.' >&2; exit 1; }
-    gzip -dc "$root/images/$commit.tar.gz" | "${docker[@]}" image load
+    [[ -f "$archive" ]] || { echo 'Run the build phase first.' >&2; exit 1; }
+    if ! $archive_verified; then
+        python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
+    fi
+    gzip -dc "$archive" | "${docker[@]}" image load
 fi
 model_id="$("${docker[@]}" image inspect --format '{{.Id}}' "$model")"
 simulator_id="$("${docker[@]}" image inspect --format '{{.Id}}' "$simulator")"
+python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" \
+    --model-id "$model_id" --simulator-id "$simulator_id"
+if [[ "$phase" == build ]]; then exit 0; fi
 export SCALAR_PI_IMAGE_ID="$model_id"
 export SCALAR_PI_MODEL_IMAGE="$model_id"
 export SCALAR_PI_SIMULATOR_IMAGE="$simulator_id"
 
 if [[ "$phase" == evaluate ]]; then
     exec python3 scripts/evaluate_potential.py "$@" --execute
+fi
+if [[ "$phase" == calibrate ]]; then
+    exec python3 scripts/calibrate_potential_evaluation.py "$@" --execute
 fi
 if [[ "$phase" == archive ]]; then
     # Logs and final checkpoints already live on the persistent filesystem.
@@ -64,7 +89,11 @@ common=(run --rm --init -i --gpus all --network host --stop-timeout 120
     -e GIT_CONFIG_COUNT=2 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/app
     -e GIT_CONFIG_KEY_1=safe.directory -e GIT_CONFIG_VALUE_1=/app/third_party/libero
     -e "SCALAR_PI_IMAGE_ID=$model_id" -e "SCALAR_PI_MODEL_IMAGE=$model_id"
-    -e "SCALAR_PI_SIMULATOR_IMAGE=$simulator_id")
+    -e "SCALAR_PI_SIMULATOR_IMAGE=$simulator_id"
+    -e "SCALAR_PI_DEADLINE_UNIX=${SCALAR_PI_DEADLINE_UNIX:-}"
+    -e "SCALAR_PI_ATTEMPT=${SCALAR_PI_ATTEMPT:-}"
+    -e "SCALAR_PI_HOURLY_RATE_USD=${SCALAR_PI_HOURLY_RATE_USD:-}"
+    -e "SCALAR_PI_FORECAST_RATE_USD=${SCALAR_PI_FORECAST_RATE_USD:-}")
 jax_platform=cpu
 managed_container=false
 case "$phase" in

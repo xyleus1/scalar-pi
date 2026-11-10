@@ -59,9 +59,11 @@ It does not launch a GPU or change the shared account firewall. Instance
 cloud-init restricts incoming host traffic to the configured SSH /32. The
 policy server also binds to localhost.
 
-The observed H100 PCIe quote on 2026-11-10 was $3.29/hour. This is not a future
-price guarantee. Inspection and launch recheck the price and capacity; the
-controller refuses a higher rate or substitute hardware. Lambda bills idle
+The observed H100 PCIe API quote on 2026-11-10 was $3.29/hour. The
+[published price](https://lambda.com/pricing) increases to $3.79/hour at
+2026-11-16 00:00 UTC, so forecasts already use $3.79. The live quote and forecast
+remain separate. The controller refuses a session crossing that transition,
+a quote above the configured ceiling, or substitute hardware. Lambda bills idle
 instances and bills storage after instances terminate. See the official
 [API](https://docs.lambda.com/api/cloud),
 [filesystem](https://docs.lambda.com/public-cloud/filesystems/), and
@@ -75,13 +77,20 @@ files from `data/experiments/reports`, and terminates the recorded instance in a
 `finally` block. Logs and the cost ledger live beside the private settings.
 
 ```powershell
-& $lambda run --script scripts/lambda/prepare.sh --commit $commit --max-hours 4
-# Review the preview, then explicitly launch:
-& $lambda run --script scripts/lambda/prepare.sh --commit $commit --max-hours 4 --execute
+& $lambda run --stage canary --script scripts/lambda/canary.sh --commit $commit --max-hours 0.25
+& $lambda run --stage canary --script scripts/lambda/canary.sh --commit $commit --max-hours 0.25 --execute
+# After reviewing the retained canary report and confirmed termination:
+& $lambda run --script scripts/lambda/prepare.sh --commit $commit --max-hours 2 --execute
 ```
 
-Choose a session duration inside the remaining phase allowance. Four hours is
-an example lease, not a measured preparation estimate. The controller counts
+The canary checks SSH, the attached NFS mount, GPU identity, host resources,
+Docker, and its NVIDIA runtime. It writes a checksummed marker and terminates
+without fetching model weights, data, or running a simulator. The next instance
+must verify that marker on a different boot before staging begins.
+
+Sessions are supervised: the canary is limited to 15 minutes, qualification to
+two hours, and research to four hours. Work completion ends the session early.
+Choose a duration inside the remaining cumulative phase allowance. The controller counts
 boot, setup, idle time, and execution, rechecks price during the session, and
 keeps 20% compute headroom. It refuses concurrent controllers and another
 session while an earlier recorded instance or uncertain launch is unresolved.
@@ -106,14 +115,16 @@ absent recorded instance reconciles the ledger conservatively.
 ## 3. Staging and data audit
 
 `prepare.sh` builds both existing images and saves them on persistent storage
-for later instances. It stages:
+for later instances. Image IDs and the archive checksum are verified on reuse.
+Staging proceeds in this order:
 
+- Base checkpoint, tokenizer, and its verified FP32 Torch conversion.
+- An early full-size scalar CUDA math probe, before the dataset or reference.
 - Dataset `physical-intelligence/libero` at immutable revision
   `a4336d589d589045d1c56423ffdf3b88a0e19b1f`.
-- Original `pi05_base` and released `pi05_libero` checkpoints and tokenizer.
-- Verified FP32 Torch conversions of both checkpoints.
 - One official normalization asset copied identically to B0/B1/P.
 - A complete decoded-data audit and a fixed 40-task observation corpus.
+- Released `pi05_libero` checkpoint and verified FP32 Torch conversion.
 
 The dataset has 1,693 episodes, 273,465 frames, and 40 tasks. Snapshot files are
 bound to remote Git/LFS digests. The audit checks images, finite values,
@@ -133,9 +144,12 @@ host path `/lambda/nfs/scalar-pi/data`. That second mount lets host orchestratio
 and both containers refer to the same result/checkpoint paths. Exact Docker
 image IDs are supplied automatically to training and evaluation provenance.
 
-Preserve failed-attempt outputs. Staging downloads are resumable, but audit,
-parity, and experiment files are evidence; use a new attempt path when an
-existing command refuses overwrite.
+Each stage records source, output, parameter, code, and container identities.
+A matching content-verified receipt reuses the result; a mismatch stops.
+Downloads can resume after interruption. Completed conversions, normalization,
+audits, and exports are not regenerated just because a new instance was launched.
+Preserve failed-attempt outputs and investigate numerical or infrastructure
+failures before retrying; attempt names are never used to select better results.
 On repeated staging, `--verify-audit` checks the existing corpus against its
 audit, the verified dataset, and current normalization before reusing it.
 
@@ -144,7 +158,7 @@ audit, the verified dataset, and current normalization before reusing it.
 Launch these as separate bounded sessions using the same `run` command:
 
 ```powershell
-& $lambda run --script scripts/lambda/qualify.sh --commit $commit --max-hours 4 --execute
+& $lambda run --script scripts/lambda/qualify.sh --commit $commit --max-hours 2 --execute
 & $lambda run --script scripts/lambda/smoke_libero.sh --commit $commit --max-hours 1 --execute
 ```
 
@@ -172,7 +186,7 @@ and state. A numerical qualification report is not a training-cost profile.
 ## 5. Select batching, then measure cost
 
 ```powershell
-& $lambda run --script scripts/lambda/profile.sh --commit $commit --max-hours 4 --execute
+& $lambda run --script scripts/lambda/profile.sh --commit $commit --max-hours 2 --execute
 ```
 
 The batch selector runs two complete optimizer updates per candidate, including
@@ -180,7 +194,11 @@ optimizer/EMA allocation. It searches power-of-two microbatches dividing 256,
 keeps 10% memory headroom, and tries gradient checkpointing only if microbatch 1
 cannot satisfy the requirement without it. Unknown failures abort; only a
 recognized memory failure permits a smaller candidate. Its short profiles are
-explicitly ineligible as cost measurements.
+explicitly ineligible as cost measurements. Candidates do not save full model
+checkpoints. Only the selected P configuration performs checkpoint publication,
+reload, actual policy serving, and exact uninterrupted-versus-resumed update
+comparison. Numerical qualification and recovery receipts gate cost profiling
+and research training.
 
 The selected microbatch and checkpointing setting apply to every arm. The
 profile phase then measures ten warmup and 100 complete batch-256 updates for
@@ -188,30 +206,40 @@ each arm, plus checkpoint publication time/size. It saves diagnostic profile
 checkpoints, which cannot be resumed or evaluated as completed research runs.
 Before reusing a batch selection, both profiling and training verify its source,
 container, checkpoint, dataset manifest, and all three normalization assets.
-Repeated profiling uses a new attempt directory. The completed reports are
-copied to `data/experiments/reports/profiles/<config>.json` for cost review.
+Each arm publishes its verified completed profile immediately to
+`data/experiments/reports/profiles/<config>.json`. A later session validates and
+reuses completed arms; interrupted arms retain their attempt evidence.
 
 Use `configs/potential/measured_budget.example.json` as the measured-cost input.
 It intentionally contains nulls and `measured_gpu=false`, so it cannot authorize
 a run unchanged. Populate its update times from retained profile reports.
-Populate per-arm/K/suite evaluation durations from actual rollout/timing
-measurements, allowing the full task timeout. Do not extrapolate weak policies
-from quick successful reference episodes. Set the checkpoint interval to
+Use the [calibration spec and commands](evaluation_calibration.md) with
+`scripts/calibrate_potential_evaluation.py` for per-arm/K policy timing and
+native full-length scene/render timing. Its report supplies measured per-task
+admission bounds, including cold startup and RPC overhead from smoke logs.
+These are cost diagnostics, not success-rate observations. Do not extrapolate
+weak policies from quick successful reference episodes. Set the checkpoint interval to
 `max(1, min(5000, floor(3600 / mean_update_seconds)))` and use the measured
-publication time per save. Include incurred costs and remaining storage/tax
-allowances in `fixed_cost_usd`.
+publication time per save. Record startup/transfer/compilation cost per session,
+measured shutdown allowance, actual filesystem price and retained/projected
+bytes, and retention through completion plus the 14-day export window. Storage
+is calculated separately; `fixed_cost_usd` holds incurred costs and other
+nonstorage costs such as taxes. Do not count storage again there.
 
 Inside a user-launched shell phase, the decision command is:
 
 ```bash
 bash scripts/lambda/run.sh model --execute python scripts/potential_preflight.py \
   --profile /data/experiments/measured_budget.json --select-study \
+  --study-lock /data/experiments/reports/study_decision.json \
   --hourly-rate-usd "$SCALAR_PI_HOURLY_RATE_USD" --budget-usd 2000 \
   --require-profile --report /data/experiments/reports/budget.json
 ```
 
-This chooses the complete three-seed study, then the complete seed-42 pilot,
-or neither. It does not shorten 30,000-update exposure. The report is downloaded
+The first decision chooses the complete three-seed study, then the complete
+seed-42 pilot, or neither. It locks that choice and scientific identity before
+comparative outcomes. Later forecasts retain that choice or stop; they cannot
+switch scope. It does not shorten 30,000-update exposure. The report is downloaded
 to the private Windows `reports/<session-name>` directory on session completion.
 Regenerate the decision before subsequent research sessions, listing completed
 training checkpoints and evaluation-suite manifests; their actual artifacts
@@ -224,7 +252,7 @@ Use the downloaded measured decision to authorize a research session:
 
 ```powershell
 & $lambda run --stage research --script scripts/lambda/train.sh --commit $commit `
-  --budget-report PATH_TO_DOWNLOADED_BUDGET_JSON --max-hours 8 --execute
+  --budget-report PATH_TO_DOWNLOADED_BUDGET_JSON --max-hours 4 --execute
 ```
 
 The controller copies that exact decision to persistent storage at
@@ -237,13 +265,14 @@ Completed runs pass byte and protocol verification before being skipped. If a
 startup failed before producing any resumable checkpoint, its directory moves
 to `experiments/interrupted-starts` before retrying the same seed.
 
-The trainer stops at an optimizer boundary before the controller deadline,
-reserving ten minutes for saving/cleanup. SIGTERM/SIGINT also request a boundary
+The absolute controller deadline includes initialization. Before admitting the
+next optimizer update, the trainer reserves at least ten minutes plus measured
+work/save allowance. SIGTERM/SIGINT also request a boundary
 stop. Checkpoints retain raw weights, EMA, optimizer, RNG, data cursor, and
 protocol metadata. Resume rejects different source/image/dependencies,
 optimizer settings, dataset, normalization, or numerical settings.
-The ten-minute margin must cover model/data initialization and checkpoint I/O;
-check those timings during qualification and increase it if necessary. The
+Check startup and checkpoint timings during qualification and increase the
+shutdown allowance when measurements require it. The
 controller's hard deadline can otherwise interrupt unsaved work. Checkpoint
 cadence is read from the same measured budget report used to admit the session.
 
@@ -267,10 +296,16 @@ bash scripts/lambda/run.sh evaluate --execute /lambda/nfs/scalar-pi/data/experim
 ```
 
 Use `--study full` for the full decision. The first evaluator command is a dry
-run. Use `--resume-completed-suites` only to skip validated complete suites.
-For an interrupted suite, preserve its old directory and set the manifest's
-`suite_attempts` entry to a fresh attempt name. Choose replacement attempts for
-infrastructure recovery, never for higher success.
+run. Attach the calibration report as the manifest's `timing_report` before a
+bounded research evaluation. Recovery works in complete task units: each task
+retains all 50 prescribed states. Ten verified task units form one canonical
+500-episode suite. Completed units are reused. One simulator process handles
+the pending tasks within a suite; the policy server is retained across suites
+at the same checkpoint and K. Preserve an
+interrupted task attempt and name its replacement explicitly in `task_attempts`.
+Choose replacements for infrastructure recovery, never for higher success.
+Cold startup is recorded separately, RPC calls have finite timeouts, and bulk
+evaluation does not collect video frames.
 
 Both protocols use all four suites, ten tasks/suite, 50 official initial
 states/task, native camera processing, ten settling actions, action horizon 10,
@@ -338,8 +373,7 @@ evaluation validation, and mocked cloud lifecycle. They do not establish full
 checkpoint parity, GPU memory fit, real rendering, convergence, or success rate.
 Those gates remain explicit user-launched phases above.
 
-Implementation validation on 2026-11-10: **268 CPU tests passed** with one upstream
-`pynvml` deprecation warning. Ruff checks passed, all six Lambda shell scripts
-passed Bash syntax checks, and the Windows wrapper passed its resource-free
-dry run. Docker builds, CUDA qualification, full dataset decoding, and actual
-LIBERO rollouts were not run on this workstation.
+The execution changes are validated with CPU tests, static checks, Bash syntax
+checks, and resource-free controller previews. Docker builds, CUDA qualification,
+full dataset decoding, and actual LIBERO rollouts require the explicit cloud
+phases above; local validation does not substitute for those results.

@@ -179,10 +179,13 @@ def test_cli_verifies_base_inputs_separately_from_terminal_weights(verifier, tmp
     (weights / "config.json").write_text("{}")
     manifest = tmp_path / "data.json"
     manifest.write_text("{}")
+    qualification = tmp_path / "qualification.json"
+    qualification.write_text("{}")
     selection["inputs_sha256"] = {
         "weights": verifier.digest(weights / "model.safetensors"),
         "conversion_receipt": verifier.digest(weights / "config.json"),
         "data_manifest": verifier.digest(manifest),
+        "qualification": verifier.digest(qualification),
     }
     selection.update(
         schema_version=1, kind="batch_selection", verified=True, effective_batch_size=256, matmul_precision="highest"
@@ -231,6 +234,8 @@ def test_cli_verifies_base_inputs_separately_from_terminal_weights(verifier, tmp
             str(weights),
             "--data-manifest",
             str(manifest),
+            "--qualification-report",
+            str(qualification),
         ]
     )
     report = json.loads(capsys.readouterr().out)

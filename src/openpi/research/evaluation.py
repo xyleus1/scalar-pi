@@ -150,6 +150,10 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     diagnostic = manifest.get("diagnostic", False)
     if type(diagnostic) is not bool:
         raise ValueError("diagnostic must be a JSON boolean")
+    if type(manifest.get("task_shards", False)) is not bool:
+        raise ValueError("task_shards must be a JSON boolean")
+    if any(not isinstance(manifest.get(field, {}), dict) for field in ("suite_attempts", "task_attempts")):
+        raise ValueError("Attempt selections must be JSON objects")
     require_provenance = manifest.get("require_provenance", not diagnostic)
     if type(require_provenance) is not bool or (not diagnostic and not require_provenance):
         raise ValueError("Benchmark studies require provenance; only diagnostic runs may disable it")
@@ -218,7 +222,7 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             raise ValueError("The declared pilot uses one training seed")
         if any(set(seeds) != set(expected_seeds) for seeds in groups.values()):
             raise ValueError("Each trained group must contain exactly the declared training seeds")
-    for attempt in manifest.get("suite_attempts", {}).values():
+    for attempt in (*manifest.get("suite_attempts", {}).values(), *manifest.get("task_attempts", {}).values()):
         if (
             not isinstance(attempt, str)
             or not attempt
@@ -252,7 +256,121 @@ def matrix_cells(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     declared = set(manifest.get("suite_attempts", {}))
     if declared - {f"{c['checkpoint_id']}/k{c['num_steps']}/{c['suite']}" for c in cells}:
         raise ValueError("suite_attempts contains a cell outside the declared matrix")
+    task_keys = {
+        f"{c['checkpoint_id']}/k{c['num_steps']}/{c['suite']}/task-{task:02d}"
+        for c in cells
+        for task in range(manifest.get("num_tasks_per_suite", 10))
+    }
+    if set(manifest.get("task_attempts", {})) - task_keys:
+        raise ValueError("task_attempts contains a task outside the declared matrix")
     return cells
+
+
+def task_log_path(cell: dict, task_id: int, attempt: str = "initial") -> str:
+    path = Path(cell["episode_log_path"])
+    return str(path.with_suffix(".tasks") / f"task-{task_id:02d}" / f"{attempt}.jsonl")
+
+
+def task_attempt(manifest: dict, cell: dict, task_id: int) -> str:
+    key = f"{cell['checkpoint_id']}/k{cell['num_steps']}/{cell['suite']}/task-{task_id:02d}"
+    return manifest.get("task_attempts", {}).get(key, "initial")
+
+
+def suite_manifest(manifest: dict, cell: dict) -> dict:
+    """Validation view retaining the parent study's provenance and attempt selection."""
+    key = f"{cell['checkpoint_id']}/k{cell['num_steps']}/{cell['suite']}"
+    return {
+        **manifest,
+        "diagnostic": True,
+        "variants": [v for v in manifest["variants"] if v["checkpoint_id"] == cell["checkpoint_id"]],
+        "num_steps": [cell["num_steps"]],
+        "suites": [cell["suite"]],
+        "require_provenance": manifest.get("require_provenance", not manifest.get("diagnostic", False)),
+        "suite_attempts": {k: v for k, v in manifest.get("suite_attempts", {}).items() if k == key},
+        "task_attempts": {k: v for k, v in manifest.get("task_attempts", {}).items() if k.startswith(key + "/task-")},
+    }
+
+
+def validate_task_log(manifest: dict, cell: dict, task_id: int, path: str | Path) -> list[dict]:
+    records = read_episodes([path])
+    validate_results(
+        records,
+        suite_manifest(manifest, cell),
+        task_ids=[task_id],
+        require_primary_checkpoint=not manifest.get("diagnostic", False),
+    )
+    return records
+
+
+def aggregate_tasks(manifest: dict, cell: dict) -> dict:
+    """Publish a canonical suite only after every selected task attempt passes validation."""
+    destination = Path(cell["episode_log_path"])
+    if destination.exists():
+        raise FileExistsError(f"Canonical suite already exists: {destination}")
+    records, sources = [], []
+    for task in range(manifest.get("num_tasks_per_suite", 10)):
+        attempt = task_attempt(manifest, cell, task)
+        path = task_log_path(cell, task, attempt)
+        records.extend(validate_task_log(manifest, cell, task, path))
+        sources.append({"task_id": task, "task_attempt_id": attempt, "path": path, "sha256": file_digest(path)})
+    validation = validate_results(
+        records, suite_manifest(manifest, cell), require_primary_checkpoint=not manifest.get("diagnostic", False)
+    )
+    digests = {row.get("provenance_sha256") for row in records}
+    if len(digests) != 1:
+        raise ValueError("Task shards do not share identical suite provenance")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if records[0].get("_provenance"):
+        sidecar = destination.with_suffix(".provenance.json")
+        if sidecar.exists():
+            if content_digest(json.loads(sidecar.read_text())) != records[0]["provenance_sha256"]:
+                raise ValueError("Existing suite sidecar differs from task provenance")
+        else:
+            write_provenance(destination, records[0]["_provenance"])
+    temporary = destination.with_suffix(".assembling")
+    with temporary.open("w", encoding="utf-8") as stream:
+        for row in sorted(records, key=lambda row: (row["task_id"], row["initial_state_id"])):
+            stream.write(
+                json.dumps({k: v for k, v in row.items() if k != "_provenance"}, sort_keys=True, allow_nan=False) + "\n"
+            )
+    temporary.replace(destination)
+    receipt = {"schema_version": 1, "episode_log_sha256": file_digest(destination), "tasks": sources}
+    destination.with_suffix(".task_receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    return validation
+
+
+def task_budget_seconds(manifest: dict, cell: dict) -> float:
+    timing = manifest
+    if manifest.get("timing_report"):
+        timing = json.loads(Path(manifest["timing_report"]).read_text())
+    value = (
+        timing.get("task_budget_seconds", {}).get(cell["group"], {}).get(str(cell["num_steps"]), {}).get(cell["suite"])
+    )
+    if value is None and manifest.get("diagnostic", False):
+        value = manifest.get("diagnostic_task_budget_seconds", 900)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError("A finite measured task budget is required before deadline-bound evaluation")
+    return float(value)
+
+
+def verify_timing_report(path: str | Path) -> dict:
+    report = json.loads(Path(path).read_text())
+    if report.get("purpose") != "evaluation_cost_calibration" or report.get("passed") is not True:
+        raise ValueError("Evaluation requires a completed component calibration")
+    if report.get("source") != source_identity(Path(__file__).resolve().parents[3]):
+        raise ValueError("Evaluation calibration source differs from current execution")
+    if report.get("model_image") != os.environ.get("SCALAR_PI_MODEL_IMAGE") or report.get(
+        "simulator_image"
+    ) != os.environ.get("SCALAR_PI_SIMULATOR_IMAGE"):
+        raise ValueError("Evaluation calibration containers differ from current execution")
+    evidence = report.get("evidence")
+    if (
+        not isinstance(evidence, dict)
+        or not evidence
+        or any(file_digest(name) != expected for name, expected in evidence.items())
+    ):
+        raise ValueError("Evaluation calibration evidence is missing or changed")
+    return report
 
 
 def _record_key(record: dict[str, Any]) -> tuple:
@@ -343,16 +461,24 @@ def validate_results(
     manifest: dict[str, Any],
     *,
     require_primary_checkpoint: bool = False,
+    task_ids: list[int] | None = None,
 ) -> dict[str, int]:
     """Fail closed for missing/duplicate episodes, stale settings, and execution errors."""
     cells = matrix_cells(manifest)
     variants = {v["checkpoint_id"]: v for v in manifest["variants"]}
     trials = manifest.get("num_trials_per_task", 50)
     tasks = manifest.get("num_tasks_per_suite", 10)
+    selected_tasks = list(range(tasks)) if task_ids is None else task_ids
+    if (
+        not selected_tasks
+        or len(set(selected_tasks)) != len(selected_tasks)
+        or any(type(task) is not int or not 0 <= task < tasks for task in selected_tasks)
+    ):
+        raise ValueError("Task validation requires unique original task IDs within the suite")
     expected = {
         (cell["checkpoint_id"], cell["num_steps"], cell["suite"], task, state)
         for cell in cells
-        for task in range(tasks)
+        for task in selected_tasks
         for state in range(trials)
     }
     seen = set()
@@ -367,6 +493,8 @@ def validate_results(
             key = _record_key(record)
         except KeyError as exc:
             raise ValueError(f"Missing record identity field: {exc}") from exc
+        if any(type(record[field]) is not int for field in ("task_id", "initial_state_id")):
+            raise ValueError("Task and initial-state identities must be integers")
         if key in seen:
             raise ValueError(f"Duplicate episode: {key}")
         if key not in expected:
@@ -414,6 +542,11 @@ def validate_results(
         )
         if record.get("attempt_id", "initial") != cell_attempts[key[:3]]:
             raise ValueError(f"Attempt differs from the explicitly selected suite attempt: {key}")
+        expected_task_attempt = task_attempt(
+            manifest, {"checkpoint_id": key[0], "num_steps": key[1], "suite": key[2]}, record["task_id"]
+        )
+        if record.get("task_attempt_id", "initial") != expected_task_attempt:
+            raise ValueError(f"Task attempt differs from the selected attempt: {key}")
         if manifest.get("require_provenance", not manifest.get("diagnostic", False)):
             provenance = validate_provenance(record)
             environment = {
