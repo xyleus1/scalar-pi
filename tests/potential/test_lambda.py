@@ -386,6 +386,15 @@ def test_unverified_canary_has_cumulative_cost_and_reserve_limit(cloud, canary_c
         cloud.check_allowance(canary_config, {"runs": []}, 0.25, 3.29, "canary")
 
 
+def test_approved_retry_preserves_spending_and_reserve(cloud, canary_config):
+    canary_config["canary_allowance_usd"] = 5
+    state = {"runs": [{"started_unix": 0, "ended_unix": 17 * 60, "hourly_rate_usd": 3.29, "stage": "canary"}]}
+    cloud.validate_config(canary_config)
+    allowance = cloud.check_allowance(canary_config, state, 0.25, 3.29, "canary")
+    assert allowance["canary_with_reserve_usd"] == pytest.approx(17 / 60 * 3.29 + 0.75 + 1.2 * 0.25 * 3.79)
+    assert canary_config["credits_verified"] is False
+
+
 @pytest.mark.parametrize("stage", ["qualification", "research"])
 def test_canary_exception_does_not_authorize_training(cloud, canary_config, tmp_path, stage):
     client = FakeLambda(canary_config)
@@ -401,8 +410,8 @@ def test_canary_exception_rejects_arbitrary_worker_script(cloud, canary_config, 
     with pytest.raises(ValueError, match="canonical"):
         cloud.run_session(client, canary_config, {"runs": []}, tmp_path / "state.json", args)
     assert client.calls == []
-    canary_config["canary_allowance_usd"] = 2.01
-    with pytest.raises(ValueError, match=r"exceed \$2"):
+    canary_config["canary_allowance_usd"] = 5.01
+    with pytest.raises(ValueError, match=r"exceed \$5"):
         cloud.validate_config(canary_config)
 
 
