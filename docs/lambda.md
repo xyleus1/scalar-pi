@@ -132,6 +132,14 @@ boot, setup, idle time, and execution, rechecks price during the session, and
 keeps 20% compute headroom. It refuses concurrent controllers and another
 session while an earlier recorded instance or uncertain launch is unresolved.
 
+For infrastructure canaries, the controller probes SSH once the API reports an
+IP in either `booting` or `active` state, because provider status can lag guest
+readiness. SSH can use the remaining 15-minute session window; it does not reset
+or extend that deadline. The worker still waits for cloud-init before checking
+out the pinned commit and running the probe. Unhealthy, terminated, and preempted
+instances are rejected. Qualification and research continue to require `active`
+and allow at most 120 seconds for SSH readiness.
+
 **Keep Windows awake and the foreground controller running.** A local process
 cannot guarantee termination if the computer loses power/network access. The
 ledger is an estimate, not a provider-enforced spending cap. Linux shutdown

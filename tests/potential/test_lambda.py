@@ -311,6 +311,139 @@ def test_ssh_readiness_timeout_still_terminates_instance(cloud, config, tmp_path
     assert state["runs"][0]["ended_unix"] == elapsed[0]
 
 
+@pytest.fixture
+def canary_session():
+    state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
+    args = SimpleNamespace(
+        max_hours=0.25,
+        stage="canary",
+        budget_report=None,
+        commit="a" * 40,
+        script=ROOT / "scripts/lambda/canary.sh",
+    )
+    return state, args
+
+
+@pytest.mark.parametrize(("ready_after", "timeout_first"), [(0, False), (180, False), (870, True)])
+def test_canary_uses_ssh_readiness_while_provider_still_reports_booting(
+    cloud, canary_config, canary_session, tmp_path, monkeypatch, ready_after, timeout_first
+):
+    state, args = canary_session
+    client = FakeLambda(canary_config)
+    client.status = "booting"
+    elapsed = [1000]
+    readiness_calls = []
+    submitted = []
+
+    class CapturedInput(io.BytesIO):
+        def close(self):
+            submitted.append(self.getvalue().decode())
+            super().close()
+
+    def remote_command(argv, **kwargs):
+        if argv[0] == "scp":
+            return SimpleNamespace(returncode=0)
+        assert argv[-1] == "true"
+        readiness_calls.append(elapsed[0])
+        if timeout_first and len(readiness_calls) == 1:
+            elapsed[0] += kwargs["timeout"]
+            raise cloud.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return SimpleNamespace(returncode=0 if elapsed[0] >= 1000 + ready_after else 255)
+
+    def start_worker(*_args, **_kwargs):
+        assert client.status == "booting"
+        return SimpleNamespace(stdin=CapturedInput(), poll=lambda: 0, returncode=0)
+
+    monkeypatch.setattr(cloud.time, "time", lambda: elapsed[0])
+    monkeypatch.setattr(cloud.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    monkeypatch.setattr(cloud.subprocess, "run", remote_command)
+    monkeypatch.setattr(cloud.subprocess, "Popen", start_worker)
+    cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
+    assert 1000 + ready_after <= elapsed[0] < 1900
+    assert len(submitted) == 1
+    assert submitted[0].index("sudo cloud-init status --wait") < submitted[0].index("scripts/lambda/canary.py probe")
+    assert "git submodule update" not in submitted[0]
+    assert state["runs"][0]["reports_downloaded"] is True
+    assert client.status == "terminated"
+
+
+def test_canary_ssh_timeouts_use_original_session_deadline_and_terminate(
+    cloud, canary_config, canary_session, tmp_path, monkeypatch
+):
+    state, args = canary_session
+    client = FakeLambda(canary_config)
+    client.status = "booting"
+    elapsed = [1000]
+
+    def timeout(argv, **kwargs):
+        elapsed[0] += kwargs["timeout"]
+        raise cloud.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(cloud.time, "time", lambda: elapsed[0])
+    monkeypatch.setattr(cloud.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    monkeypatch.setattr(cloud.subprocess, "run", timeout)
+    monkeypatch.setattr(cloud.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Started before SSH was ready"))
+    with pytest.raises(TimeoutError, match="SSH did not become ready"):
+        cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
+    assert state["runs"][0]["ended_unix"] == 1900
+    assert state["runs"][0]["reports_downloaded"] is False
+    assert client.status == "terminated"
+
+
+@pytest.mark.parametrize("status", ["unhealthy", "terminated", "preempted"])
+def test_canary_rejects_terminal_provider_states_before_ssh(
+    cloud, canary_config, canary_session, tmp_path, monkeypatch, status
+):
+    state, args = canary_session
+    client = FakeLambda(canary_config)
+    client.status = status
+    monkeypatch.setattr(cloud.subprocess, "run", lambda *_a, **_k: pytest.fail("Probed SSH on an unhealthy instance"))
+    monkeypatch.setattr(cloud.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Started an unhealthy instance"))
+    with pytest.raises(RuntimeError, match="did not become healthy"):
+        cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
+    assert client.status == "terminated"
+
+
+@pytest.mark.parametrize("stage", ["qualification", "research"])
+def test_noncanary_stages_still_wait_for_active_status(cloud, config, tmp_path, monkeypatch, stage):
+    client = FakeLambda(config)
+    client.status = "booting"
+    elapsed = [1000]
+    script = tmp_path / "phase.sh"
+    script.write_text("exit 0\n")
+    report = tmp_path / "budget.json"
+    report.write_text(
+        json.dumps(
+            {
+                "selected_study": "pilot",
+                "budget_usd": 2000,
+                "live_hourly_rate_usd": 3.29,
+                "forecast_hourly_rate_usd": 3.29,
+                "remaining_compute_cost_with_headroom_usd": 1,
+                "experiment_identity": {"code_commit": "a" * 40, "container_image_id": "sha256:" + "b" * 64},
+                "study_lock_sha256": "c" * 64,
+            }
+        )
+    )
+    args = SimpleNamespace(
+        max_hours=0.025,
+        stage=stage,
+        budget_report=report if stage == "research" else None,
+        commit="a" * 40,
+        script=script,
+    )
+    state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
+    monkeypatch.setattr(cloud.time, "time", lambda: elapsed[0])
+    monkeypatch.setattr(cloud.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    monkeypatch.setattr(cloud.subprocess, "run", lambda *_a, **_k: pytest.fail("Probed noncanary SSH while booting"))
+    monkeypatch.setattr(
+        cloud.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Started noncanary work while booting")
+    )
+    with pytest.raises(TimeoutError, match="Session deadline reached during boot"):
+        cloud.run_session(client, config, state, tmp_path / "state.json", args)
+    assert client.status == "terminated"
+
+
 def test_launch_never_uploads_api_key(cloud, config, monkeypatch):
     monkeypatch.setenv("LAMBDA_API_KEY", "fixture-secret-never-upload")
     payload = cloud.launch_body(config, {"resources": {"filesystem_id": "owned-fs"}}, "a" * 40, "scalar-pi-owned")

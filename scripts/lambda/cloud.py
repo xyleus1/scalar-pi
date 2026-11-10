@@ -510,10 +510,12 @@ def run_session(client, config, state, state_path, args):
         save_state(state_path, state)
         while time.time() < deadline:
             instance = client.request("GET", "instances/" + instance_id)
-            if instance["status"] == "active" and instance.get("ip"):
-                break
             if instance["status"] in {"unhealthy", "terminated", "preempted"}:
                 raise RuntimeError("Instance did not become healthy")
+            if instance.get("ip") and (
+                instance["status"] == "active" or (args.stage == "canary" and instance["status"] == "booting")
+            ):
+                break
             time.sleep(5)
         else:
             raise TimeoutError("Session deadline reached during boot")
@@ -537,17 +539,23 @@ def run_session(client, config, state, state_path, args):
         command = ["ssh", *ssh_options, "ubuntu@" + instance["ip"], "bash -c " + shlex.quote(receiver)]
         print(f"Running {name}; output: {log}. Keep this controller awake until termination is confirmed.")
         environment = {key: value for key, value in os.environ.items() if key != "LAMBDA_API_KEY"}
-        ssh_deadline = min(deadline, time.time() + 120)
+        # Provider status can lag guest readiness. Canary SSH probes are harmless;
+        # the worker still waits for cloud-init inside the original session limit.
+        ssh_deadline = deadline if args.stage == "canary" else min(deadline, time.time() + 120)
         while time.time() < ssh_deadline:
-            ready = subprocess.run(
-                ["ssh", *ssh_options, "ubuntu@" + instance["ip"], "true"],
-                env=environment,
-                capture_output=True,
-                timeout=max(1, min(35, ssh_deadline - time.time())),
-                check=False,
-            )
-            if ready.returncode == 0:
-                break
+            try:
+                ready = subprocess.run(
+                    ["ssh", *ssh_options, "ubuntu@" + instance["ip"], "true"],
+                    env=environment,
+                    capture_output=True,
+                    timeout=max(1, min(35, ssh_deadline - time.time())),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                pass
+            else:
+                if ready.returncode == 0:
+                    break
             time.sleep(min(5, max(0, ssh_deadline - time.time())))
         else:
             raise TimeoutError("SSH did not become ready within the session allowance")
