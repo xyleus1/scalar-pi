@@ -10,6 +10,7 @@ import shlex
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -319,6 +320,34 @@ def test_launch_never_uploads_api_key(cloud, config, monkeypatch):
     assert "0.0.0.0/0" not in payload["user_data"]
     assert payload["file_system_mounts"] == [{"file_system_id": "owned-fs", "mount_point": cloud.REMOTE_ROOT}]
     assert "file_system_names" not in payload
+
+
+def test_cloud_init_configures_nvidia_runtime_after_firewall(cloud, config):
+    payload = cloud.launch_body(config, {"resources": {"filesystem_id": "owned-fs"}}, "a" * 40, "scalar-pi-owned")
+    bootstrap = yaml.safe_load(payload["user_data"])
+    assert bootstrap["packages"] == ["ufw", "git"]
+    assert bootstrap["runcmd"][:3] == [
+        ["ufw", "default", "deny", "incoming"],
+        ["ufw", "allow", "from", "203.0.113.1/32", "to", "any", "port", "22", "proto", "tcp"],
+        ["ufw", "--force", "enable"],
+    ]
+    command = bootstrap["runcmd"][-1]
+    assert command[:2] == ["bash", "-c"]
+    script = command[2]
+    assert script.startswith("set -euo pipefail\n")
+    assert "if ! command -v nvidia-ctk >/dev/null || ! command -v nvidia-container-runtime >/dev/null; then" in script
+    assert "https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list" in script
+    assert "signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg" in script
+    for package in (
+        "nvidia-container-toolkit",
+        "nvidia-container-toolkit-base",
+        "libnvidia-container-tools",
+        "libnvidia-container1",
+    ):
+        assert package + "=1.20.1-1" in script
+    assert script.endswith("fi\nnvidia-ctk runtime configure --runtime=docker\nsystemctl restart docker\n")
+    if os.name == "posix":
+        cloud.subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True, check=True)
 
 
 def test_phase_allowance_includes_previous_sessions_and_headroom(cloud, config):

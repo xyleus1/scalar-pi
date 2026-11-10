@@ -60,8 +60,10 @@ def probe(root, destination, boot_id):
         if len(report["gpu"].splitlines()) != 1 or "H100" not in report["gpu"]:
             raise RuntimeError("Expected exactly one H100")
         report["docker_version"] = command("sudo", "-n", "docker", "version", "--format", "{{.Server.Version}}")
-        report["docker_runtimes"] = command("sudo", "-n", "docker", "info", "--format", "{{json .Runtimes}}")
-        if "nvidia" not in json.loads(report["docker_runtimes"]):
+        report["docker_runtimes"] = sorted(
+            json.loads(command("sudo", "-n", "docker", "info", "--format", "{{json .Runtimes}}"))
+        )
+        if "nvidia" not in report["docker_runtimes"]:
             raise RuntimeError("Docker NVIDIA runtime is unavailable")
         memory_kib = int(
             next(

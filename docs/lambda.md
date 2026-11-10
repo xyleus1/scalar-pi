@@ -83,6 +83,15 @@ It does not launch a GPU or change the shared account firewall. Instance
 cloud-init restricts incoming host traffic to the configured SSH /32. The
 policy server also binds to localhost.
 
+Cloud-init also registers the NVIDIA runtime with Docker and restarts its
+daemon before the canary. It reuses the image's toolkit when `nvidia-ctk` and
+`nvidia-container-runtime` are present. Otherwise it installs NVIDIA Container
+Toolkit 1.20.1-1 and its matching dependencies from NVIDIA's signed production
+apt repository, following the [official installation and Docker configuration
+instructions](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+This setup does not pull a container image or run a GPU workload. The canary still
+requires Docker to report the `nvidia` runtime; driver visibility alone is insufficient.
+
 The observed H100 PCIe API quote on 2026-11-10 was $3.29/hour. The
 [published price](https://lambda.com/pricing) increases to $3.79/hour at
 2026-11-16 00:00 UTC, so forecasts already use $3.79. The live quote and forecast

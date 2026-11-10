@@ -332,12 +332,27 @@ def launch_body(config, state, commit, name):
     cidr = ipaddress.ip_network(config["operator_cidr"], strict=True)
     if cidr.version != 4 or cidr.prefixlen != 32:
         raise ValueError("operator_cidr must be one IPv4 /32")
+    # GPU Base images can have Docker without a registered NVIDIA runtime.
+    # Reuse an installed toolkit; otherwise follow NVIDIA's signed apt setup.
+    runtime_setup = """set -euo pipefail
+if ! command -v nvidia-ctk >/dev/null || ! command -v nvidia-container-runtime >/dev/null; then
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg2
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    apt-get update
+    apt-get install -y --no-install-recommends nvidia-container-toolkit=1.20.1-1 nvidia-container-toolkit-base=1.20.1-1 libnvidia-container-tools=1.20.1-1 libnvidia-container1=1.20.1-1
+fi
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
+"""
     # Host rules enforce restriction even if the shared account firewall is broader.
     user_data = (
         "#cloud-config\npackages: [ufw, git]\nruncmd:\n"
         "  - [ufw, default, deny, incoming]\n"
         f"  - [ufw, allow, from, '{cidr}', to, any, port, '22', proto, tcp]\n"
         "  - [ufw, --force, enable]\n"
+        f"  - {json.dumps(['bash', '-c', runtime_setup])}\n"
     )
     return {
         "region_name": config["region"],
