@@ -129,6 +129,33 @@ class Policy(BasePolicy):
         elif not self._is_pytorch_model:
             jax.block_until_ready(outputs["actions"])
         model_time = time.monotonic() - start_time
+        # These explicit numerical/shape failures are model outcomes. Returning
+        # them separately prevents the benchmark from rerunning them as network
+        # interruptions. Unexpected exceptions still propagate to the caller.
+        if self._metadata.get("research") or self._metadata.get("config_name") in {
+            "pi05_libero",
+            "pi05_libero_b0",
+            "pi05_libero_b1",
+            "pi05_libero_potential",
+        }:
+            actions = outputs["actions"]
+            expected = (
+                (1, self._model.action_horizon, self._model.action_dim)
+                if not self._is_pytorch_model
+                else (1, self._model.config.action_horizon, self._model.config.action_dim)
+            )
+            finite = torch.isfinite(actions).all().item() if self._is_pytorch_model else np.isfinite(actions).all()
+            if tuple(actions.shape) != expected or not finite:
+                return {
+                    "policy_error": {
+                        "type": "invalid_actions",
+                        "message": f"Expected finite actions of shape {expected}; received {tuple(actions.shape)}",
+                    },
+                    "policy_timing": {
+                        "infer_ms": model_time * 1000,
+                        "total_ms": (time.monotonic() - total_start) * 1000,
+                    },
+                }
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:

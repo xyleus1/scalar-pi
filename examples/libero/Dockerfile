@@ -11,6 +11,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.1 /uv /uvx /bin/
 
 RUN apt-get update && \
     apt-get install -y \
+    git \
     make \
     g++ \
     clang \

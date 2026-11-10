@@ -102,3 +102,26 @@ def test_policy_rejects_ambiguous_explicit_noise_and_seed():
     policy, _ = _policy()
     with pytest.raises(ValueError, match="either noise or noise_seed"):
         policy.infer(_observation(), noise=np.zeros((10, 32), dtype=np.float32))
+
+
+@pytest.mark.parametrize("bad_shape", [False, True])
+def test_known_invalid_actions_are_policy_results_not_transport_exceptions(bad_shape):
+    class InvalidModel(RecordingModel):
+        def sample_actions(self, device, observation, **kwargs):
+            return torch.zeros(1, 2, 32) if bad_shape else torch.full((1, 10, 32), float("nan"))
+
+    policy = Policy(InvalidModel(), is_pytorch=True, metadata={"research": {"schema_version": 1}})
+    result = policy.infer(_observation())
+    assert result["policy_error"]["type"] == "invalid_actions"
+    assert "actions" not in result
+    assert result["policy_timing"]["total_ms"] >= result["policy_timing"]["infer_ms"]
+
+
+def test_unexpected_model_exception_is_not_reclassified_as_a_policy_failure():
+    class BrokenModel(RecordingModel):
+        def sample_actions(self, device, observation, **kwargs):
+            raise RuntimeError("unclassified backend failure")
+
+    policy = Policy(BrokenModel(), is_pytorch=True, metadata={"research": {"schema_version": 1}})
+    with pytest.raises(RuntimeError, match="unclassified"):
+        policy.infer(_observation())

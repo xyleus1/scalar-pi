@@ -22,7 +22,16 @@ from openpi.research import evaluation
 def _validate_suite_log(manifest: dict, checkpoint_id: str, steps: int, suite: str, path: str) -> dict:
     """Use a diagnostic validation *view*, without relaxing the original matrix."""
     variant = next(v for v in manifest["variants"] if v["checkpoint_id"] == checkpoint_id)
-    subset = {**manifest, "diagnostic": True, "variants": [variant], "num_steps": [steps], "suites": [suite]}
+    cell_key = f"{checkpoint_id}/k{steps}/{suite}"
+    subset = {
+        **manifest,
+        "diagnostic": True,
+        "variants": [variant],
+        "num_steps": [steps],
+        "suites": [suite],
+        "require_provenance": manifest.get("require_provenance", not manifest.get("diagnostic", False)),
+        "suite_attempts": {key: value for key, value in manifest.get("suite_attempts", {}).items() if key == cell_key},
+    }
     try:
         return evaluation.validate_results(
             evaluation.read_episodes([path]),
@@ -105,11 +114,15 @@ def commands(manifest: dict, *, resume_completed_suites: bool = False) -> list[d
             cell["config"],
             "--args.group",
             cell["group"],
+            "--args.attempt-id",
+            cell["attempt_id"],
             "--args.num-steps",
             str(cell["num_steps"]),
             "--args.video-out-path",
             str(Path(cell["episode_log_path"]).with_suffix("")),
         ]
+        if manifest.get("require_provenance", not manifest.get("diagnostic", False)):
+            client.append("--args.require-provenance")
         if cell.get("reference", False):
             client.append("--args.reference")
         else:
@@ -135,6 +148,28 @@ def _wait_for_server(process: subprocess.Popen, port: int, timeout: float) -> No
         except OSError:
             time.sleep(0.5)
     raise TimeoutError(f"Policy server was not ready after {timeout} seconds")
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    """Allow container wrappers to run their cleanup traps before forced termination."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _run_client(argv: list[str], *, cwd: Path, env: dict, timeout: float) -> None:
+    process = subprocess.Popen(argv, cwd=cwd, env=env)
+    try:
+        status = process.wait(timeout=timeout)
+        if status:
+            raise subprocess.CalledProcessError(status, argv)
+    finally:
+        _stop_process(process)
 
 
 def execute(manifest: dict, *, resume_completed_suites: bool = False) -> None:
@@ -176,23 +211,17 @@ def execute(manifest: dict, *, resume_completed_suites: bool = False) -> None:
                 for client in batch["clients"]:
                     if server.poll() is not None:
                         raise RuntimeError("Policy server exited before the next suite")
-                    subprocess.run(
+                    _run_client(
                         client["argv"],
                         cwd=root,
                         env=env,
-                        check=True,
                         timeout=float(manifest.get("suite_timeout_seconds", 86400)),
                     )
                     _validate_suite_log(
                         manifest, batch["checkpoint_id"], batch["num_steps"], client["suite"], client["log"]
                     )
             finally:
-                server.terminate()
-                try:
-                    server.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-                    server.wait()
+                _stop_process(server)
     records = evaluation.read_episodes([cell["episode_log_path"] for cell in evaluation.matrix_cells(manifest)])
     print(json.dumps(evaluation.validate_results(records, manifest), indent=2))
 

@@ -1,6 +1,7 @@
 # ruff: noqa: UP007 -- Optional annotations must work at runtime in the Python 3.8 simulator.
 import collections
 import dataclasses
+import hashlib
 import logging
 import math
 import pathlib
@@ -60,6 +61,12 @@ class Args:
     paired_noise_seed: Optional[int] = None
     max_tasks: Optional[int] = None  # Diagnostic runs only; primary protocol uses every task.
     save_videos: bool = True
+    require_provenance: bool = False
+    attempt_id: str = "initial"
+
+
+class InvalidPolicyActionsError(ValueError):
+    """A completed policy query returned unusable actions; this is a policy failure."""
 
 
 def eval_libero(args: Args) -> None:
@@ -112,6 +119,57 @@ def eval_libero(args: Args) -> None:
             if server_metadata.get(key) != expected:
                 raise ValueError(f"Server {key}={server_metadata.get(key)!r}, expected {expected!r}")
 
+    provenance_sha256 = None
+    if args.require_provenance:
+        if args.episode_log_path is None:
+            raise ValueError("Provenance requires an episode log")
+        task_assets = []
+        for task_id in range(num_tasks_in_suite):
+            task = task_suite.get_task(task_id)
+            initial_states = task_suite.get_task_init_states(task_id)
+            bddl = pathlib.Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
+            task_assets.append(
+                {
+                    "task_id": task_id,
+                    "description": str(task.language),
+                    "bddl_sha256": research.file_digest(bddl),
+                    "initial_states_sha256": [
+                        hashlib.sha256(np.asarray(state).tobytes()).hexdigest()
+                        for state in initial_states[: args.num_trials_per_task]
+                    ],
+                }
+            )
+        settings = {
+            "suite": args.task_suite_name,
+            "num_steps": args.num_steps,
+            "rollout_seed": args.seed,
+            "paired_noise_seed": args.paired_noise_seed,
+            "replan_steps": args.replan_steps,
+            "num_steps_wait": args.num_steps_wait,
+            "render_size": LIBERO_ENV_RESOLUTION,
+            "resize_size": args.resize_size,
+            "max_steps": max_steps,
+            "attempt_id": args.attempt_id,
+        }
+        provenance = research.suite_provenance(
+            server_metadata=server_metadata,
+            settings=settings,
+            tasks=task_assets,
+            simulator_paths={name: get_libero_path(name) for name in ("bddl_files", "init_states", "assets")},
+        )
+        research.validate_provenance(
+            {
+                **settings,
+                "server_metadata": server_metadata,
+                "reference": args.reference,
+                "task_id": 0,
+                "initial_state_id": 0,
+                "_provenance": provenance,
+                "provenance_sha256": research.content_digest(provenance),
+            }
+        )
+        provenance_sha256 = research.write_provenance(args.episode_log_path, provenance)
+
     # Start evaluation
     total_episodes, total_successes = 0, 0
     for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
@@ -139,8 +197,10 @@ def eval_libero(args: Args) -> None:
             latencies = []
             query_noise_seeds = []
             failure_tags = []
+            failure_kind = None
+            artifact_errors = []
             error_message = None
-            action_horizon = None
+            action_horizon = 10 if args.episode_log_path is not None else None
             query_index = 0
             phase = "reset"
             episode_start = time.monotonic()
@@ -150,6 +210,7 @@ def eval_libero(args: Args) -> None:
                 obs = env.set_init_state(initial_states[episode_idx])
             except Exception as exc:
                 failure_tags.append("reset_error")
+                failure_kind = "infrastructure"
                 error_message = f"{type(exc).__name__}: {exc}"
                 logging.exception("Episode reset failed")
 
@@ -207,19 +268,32 @@ def eval_libero(args: Args) -> None:
                         query_start = time.monotonic()
                         response = client.infer(element)
                         timing = {"client_roundtrip_ms": (time.monotonic() - query_start) * 1000}
-                        timing.update({k: float(v) for k, v in response.get("policy_timing", {}).items()})
+                        if isinstance(response, dict):
+                            timing.update({k: float(v) for k, v in response.get("policy_timing", {}).items()})
                         latencies.append(timing)
                         query_index += 1
-                        action_chunk = response["actions"]
                         phase = "action_validation"
+                        if not isinstance(response, dict):
+                            raise InvalidPolicyActionsError("Policy response is not an object")
+                        if response.get("policy_error"):
+                            error = response["policy_error"]
+                            if isinstance(error, dict) and error.get("type") == "invalid_actions":
+                                raise InvalidPolicyActionsError(str(error.get("message", "Invalid policy actions")))
+                            phase = "policy_inference"
+                            raise RuntimeError(f"Unclassified policy response error: {error}")
+                        try:
+                            action_chunk = np.asarray(response["actions"], dtype=float)
+                        except (KeyError, TypeError, ValueError) as exc:
+                            raise InvalidPolicyActionsError("Missing or nonnumeric action chunk") from exc
+                        if action_chunk.ndim != 2 or action_chunk.shape[1] != 7:
+                            raise InvalidPolicyActionsError("Expected a [horizon,7] LIBERO action chunk")
                         if not np.isfinite(action_chunk).all():
-                            raise ValueError("Policy returned non-finite actions")
+                            raise InvalidPolicyActionsError("Policy returned non-finite actions")
                         if action_horizon is not None and len(action_chunk) != action_horizon:
-                            raise ValueError("Policy action horizon changed within an episode")
+                            raise InvalidPolicyActionsError("Policy action horizon differs from the declared protocol")
                         action_horizon = len(action_chunk)
-                        assert len(action_chunk) >= args.replan_steps, (
-                            f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
-                        )
+                        if len(action_chunk) < args.replan_steps:
+                            raise InvalidPolicyActionsError("Policy action chunk is shorter than the replan interval")
                         action_plan.extend(action_chunk[: args.replan_steps])
 
                     action = action_plan.popleft()
@@ -237,12 +311,14 @@ def eval_libero(args: Args) -> None:
 
                 except Exception as e:
                     logging.error(f"Caught exception: {e}")
-                    failure_tags.append(f"{phase}_error")
+                    failure_kind = "policy" if isinstance(e, InvalidPolicyActionsError) else "infrastructure"
+                    failure_tags.append("invalid_actions" if failure_kind == "policy" else f"{phase}_error")
                     error_message = f"{type(e).__name__}: {e}"
                     break
 
             if not success and not failure_tags:
                 failure_tags.append("timeout")
+                failure_kind = "policy"
 
             task_episodes += 1
             total_episodes += 1
@@ -258,8 +334,7 @@ def eval_libero(args: Args) -> None:
                         fps=10,
                     )
                 except Exception as exc:
-                    failure_tags.append("video_error")
-                    error_message = f"{type(exc).__name__}: {exc}"
+                    artifact_errors.append({"kind": "video_error", "message": f"{type(exc).__name__}: {exc}"})
                     logging.exception("Replay video write failed")
 
             if args.episode_log_path is not None:
@@ -293,11 +368,15 @@ def eval_libero(args: Args) -> None:
                         "episode_seconds": time.monotonic() - episode_start,
                         "latencies": latencies,
                         "failure_tags": failure_tags,
+                        "failure_kind": failure_kind,
+                        "artifact_errors": artifact_errors,
                         "error_message": error_message,
                         "server_metadata": server_metadata,
+                        "provenance_sha256": provenance_sha256,
+                        "attempt_id": args.attempt_id,
                     },
                 )
-                if any(tag != "timeout" for tag in failure_tags):
+                if failure_kind == "infrastructure":
                     env.close()
                     raise RuntimeError(f"Research evaluation stopped after logged execution error: {error_message}")
 

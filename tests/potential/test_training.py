@@ -17,6 +17,7 @@ from openpi.training.potential import cost_forecast
 from openpi.training.potential import learning_rate
 from openpi.training.potential import load_training_checkpoint
 from openpi.training.potential import make_ema
+from openpi.training.potential import prepare_offline_dataset
 from openpi.training.potential import prune_checkpoints
 from openpi.training.potential import restore_rng_state
 from openpi.training.potential import save_checkpoint
@@ -26,6 +27,7 @@ from openpi.training.potential import stable_seed
 from openpi.training.potential import torch_rng_scope
 from openpi.training.potential import validate_base_conversion
 from openpi.training.potential import validate_data_manifest
+from openpi.training.potential import validate_resume_signature
 
 
 def test_sampler_resume_uses_consumed_cursor_not_prefetched_cursor():
@@ -322,3 +324,57 @@ def test_base_conversion_requires_fp32_bytes_and_canonical_receipt(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({**receipt, "precision": "bfloat16"}))
     with pytest.raises(ValueError, match="casting rounded"):
         validate_base_conversion(tmp_path, require_receipt=False)
+
+
+def test_offline_dataset_fails_before_loader_and_checks_configured_root(tmp_path, monkeypatch):
+    root = tmp_path / "physical-intelligence/libero"
+    (root / "meta").mkdir(parents=True)
+    (root / "data").mkdir()
+    (root / "meta/info.json").write_text("{}")
+    episode = root / "data/episode.parquet"
+    episode.write_bytes(b"data")
+    manifest = {
+        "schema_version": 1,
+        "repo_id": "physical-intelligence/libero",
+        "revision": "a" * 40,
+        "dataset_root": str(root),
+        "files": {p.relative_to(root).as_posix(): sha256_file(p) for p in root.rglob("*") if p.is_file()},
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    monkeypatch.setenv("HF_LEROBOT_HOME", str(tmp_path))
+    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+    monkeypatch.setenv("HF_DATASETS_OFFLINE", "0")
+    assert prepare_offline_dataset(path) == manifest
+    import os
+
+    assert os.environ["HF_HUB_OFFLINE"] == os.environ["HF_DATASETS_OFFLINE"] == "1"
+    (root / "data/extra.parquet").write_bytes(b"extra")
+    with pytest.raises(ValueError, match="complete loaded dataset"):
+        prepare_offline_dataset(path)
+    monkeypatch.setenv("HF_LEROBOT_HOME", str(tmp_path / "wrong-cache"))
+    with pytest.raises(ValueError, match="dataset_root"):
+        prepare_offline_dataset(path)
+
+
+@pytest.mark.parametrize(
+    "key", ["optimizer", "code_commit", "source_snapshot_sha256", "container_image_id", "packages"]
+)
+def test_resume_rejects_changed_source_container_dependencies_or_optimizer(key):
+    current = {
+        "optimizer": {"b1": 0.9, "b2": 0.95},
+        "code_commit": "a" * 40,
+        "source_snapshot_sha256": "b" * 64,
+        "container_image_id": "sha256:" + "c" * 64,
+        "packages": {"torch": "2.7.1"},
+    }
+    validate_resume_signature(current, current.copy())
+    with pytest.raises(ValueError, match=key):
+        validate_resume_signature({**current, key: "changed"}, current)
+
+
+def test_profile_cli_requires_verified_manifest():
+    from scripts.train_potential import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["pi05_libero_b0", "--exp-name", "profile", "--profile-updates", "100", "--hourly-rate", "3.29"])

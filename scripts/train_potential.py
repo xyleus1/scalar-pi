@@ -20,6 +20,8 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
+import signal
 import statistics
 import subprocess
 import time
@@ -32,12 +34,14 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 import safetensors.torch
 import torch
 
+from openpi.research.policy_checks import require_staged_tokenizer
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training.potential import ResumableBatchSampler
 from openpi.training.potential import cost_forecast
 from openpi.training.potential import learning_rate
 from openpi.training.potential import load_training_checkpoint
 from openpi.training.potential import make_ema
+from openpi.training.potential import prepare_offline_dataset
 from openpi.training.potential import prune_checkpoints
 from openpi.training.potential import save_checkpoint
 from openpi.training.potential import seed_all
@@ -45,7 +49,6 @@ from openpi.training.potential import sha256_file
 from openpi.training.potential import stable_seed
 from openpi.training.potential import torch_rng_scope
 from openpi.training.potential import validate_base_conversion
-from openpi.training.potential import validate_data_manifest
 from openpi.training.potential import write_json
 
 
@@ -68,7 +71,7 @@ def parse_args(argv=None):
         "--hourly-rate", type=float, help="Actual GPU price; required for profiling, otherwise costs remain unknown"
     )
     parser.add_argument("--max-hours", type=float, help="Stop and save at an optimizer boundary after this run time")
-    parser.add_argument("--data-manifest", type=Path, help="Immutable dataset manifest; required outside profiling")
+    parser.add_argument("--data-manifest", type=Path, required=True, help="Verified immutable dataset manifest")
     parser.add_argument("--gradient-checkpointing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--matmul-precision", choices=("highest", "high"), default="highest")
     parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
@@ -89,8 +92,6 @@ def parse_args(argv=None):
         parser.error("--max-hours must be positive")
     if args.resume is not None and (args.weights is not None or args.profile_updates):
         parser.error("--resume cannot be combined with --weights or profiling")
-    if not args.profile_updates and args.data_manifest is None:
-        parser.error("Non-profile training requires --data-manifest from prepare_potential_data.py")
     return args
 
 
@@ -126,7 +127,18 @@ def _git_state():
 
 def _packages():
     versions = {}
-    for name in ("torch", "transformers", "safetensors", "jax", "lerobot", "numpy"):
+    for name in (
+        "torch",
+        "torchvision",
+        "transformers",
+        "safetensors",
+        "jax",
+        "jaxlib",
+        "lerobot",
+        "numpy",
+        "datasets",
+        "pillow",
+    ):
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -142,6 +154,17 @@ def _append(path, value):
 def main(argv=None):
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    dataset_manifest = prepare_offline_dataset(args.data_manifest)
+    require_staged_tokenizer()
+    code = _git_state()
+    if not code["commit"] or not code["source_files_sha256"]:
+        raise ValueError("Training requires the verified Git checkout mounted at /app")
+    if code["status"]:
+        raise ValueError("Commit the reviewed experiment changes before profiling or training")
+    image_id = os.environ.get("SCALAR_PI_IMAGE_ID", "")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+        raise ValueError("Set SCALAR_PI_IMAGE_ID to the actual Docker image ID (sha256:...)")
+    packages = _packages()
     if not torch.cuda.is_available():
         raise RuntimeError("Full pi05 training requires CUDA. Run the lightweight helper tests on CPU.")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
@@ -188,6 +211,10 @@ def main(argv=None):
             action_horizon=config.model.action_horizon,
             action_dim=config.model.action_dim,
         )
+        if source_metadata is None:
+            raise ValueError("Resumption requires research checkpoint metadata")
+        if source_metadata.get("run_mode") == "profile":
+            raise ValueError("Profiling checkpoints are diagnostics; start each research run from pi05_base")
     else:
         source_metadata = validate_checkpoint_metadata(
             source,
@@ -199,7 +226,7 @@ def main(argv=None):
             raise ValueError(
                 "Fresh research training must start from converted pi05_base, not an adapted research checkpoint"
             )
-        base_conversion = validate_base_conversion(source, require_receipt=not bool(args.profile_updates))
+        base_conversion = validate_base_conversion(source, require_receipt=True)
     safetensors.torch.load_model(model, weight_file, strict=True)
     model.configure_expert_only(vlm_dtype=torch.bfloat16)
     if args.resume is None and config.model.initialization == "zero_output":
@@ -230,9 +257,18 @@ def main(argv=None):
         "schedule": schedule,
         "ema_decay": config.ema_decay,
         "matmul_precision": args.matmul_precision,
+        "run_mode": "profile" if args.profile_updates else "training",
         "deterministic": args.deterministic,
         "initialization": config.model.initialization,
         "gradient_checkpointing": args.gradient_checkpointing,
+        "optimizer": dataclasses.asdict(config.optimizer),
+        "code_commit": code["commit"],
+        "source_snapshot_sha256": code["source_snapshot_sha256"],
+        "container_image_id": image_id,
+        "packages": packages,
+        "python": platform.python_version(),
+        "cuda_runtime": torch.version.cuda,
+        "gpu": torch.cuda.get_device_name(device),
     }
     completed = 0
     consumed = 0
@@ -246,9 +282,8 @@ def main(argv=None):
             velocity_mode=config.model.velocity_mode,
             action_horizon=config.model.action_horizon,
             action_dim=config.model.action_dim,
+            expected_resume_signature=signature,
         )
-        if state["resume_signature"] != signature:
-            raise ValueError("Resume protocol differs (seed, batching, schedule, initialization, or arithmetic)")
         completed, consumed = state["optimizer_updates"], state["consumed_microbatches"]
         cumulative_seconds = state["training_seconds"]
         if consumed != completed * accumulation:
@@ -261,18 +296,16 @@ def main(argv=None):
     source_dataset = dataset
     while hasattr(source_dataset, "_dataset"):
         source_dataset = source_dataset._dataset  # noqa: SLF001
-    dataset_manifest = None
-    if args.data_manifest:
-        if not hasattr(source_dataset, "root"):
-            raise ValueError("Cannot verify loaded dataset root against manifest")
-        dataset_manifest = validate_data_manifest(
-            args.data_manifest,
-            repo_id=data_config.repo_id,
-            dataset_root=source_dataset.root,
-        )
-        manifest_hash = sha256_file(args.data_manifest)
-        if args.resume and source_metadata.get("data_manifest_sha256") != manifest_hash:
-            raise ValueError("Dataset manifest changed since the checkpoint")
+    if (
+        not hasattr(source_dataset, "root")
+        or source_dataset.root.resolve() != Path(dataset_manifest["dataset_root"]).resolve()
+    ):
+        raise ValueError("Loaded LeRobot root differs from the preverified dataset")
+    if data_config.repo_id != dataset_manifest["repo_id"]:
+        raise ValueError("Loaded dataset repository differs from the manifest")
+    manifest_hash = sha256_file(args.data_manifest)
+    if args.resume and source_metadata.get("data_manifest_sha256") != manifest_hash:
+        raise ValueError("Dataset manifest changed since the checkpoint")
     dataset = data_loader.transform_dataset(dataset, data_config)
     sampler = ResumableBatchSampler(
         len(dataset),
@@ -305,8 +338,9 @@ def main(argv=None):
         "arguments": vars(args),
         "configuration": dataclasses.asdict(config),
         "protocol": signature,
-        "code": _git_state(),
-        "packages": _packages(),
+        "code": code,
+        "packages": packages,
+        "container_image_id": image_id,
         "platform": platform.platform(),
         "gpu": torch.cuda.get_device_name(device),
         "cuda_runtime": torch.version.cuda,
@@ -325,8 +359,6 @@ def main(argv=None):
         "requested_exposure": config.batch_size * updates,
         "mode": "profile" if args.profile_updates else "training",
     }
-    if not args.data_manifest:
-        logging.warning("No immutable dataset manifest supplied; dataset revision is not independently pinned")
     manifest_path = output / (f"resume_{completed}_manifest.json" if args.resume else "run_manifest.json")
     write_json(manifest_path, manifest)
     metadata = {
@@ -345,6 +377,9 @@ def main(argv=None):
         "base_conversion_receipt_sha256": manifest["base_conversion_receipt_sha256"],
         "data_manifest_sha256": manifest["data_manifest_sha256"],
         "resume_signature": signature,
+        "container_image_id": image_id,
+        "matmul_precision": args.matmul_precision,
+        "run_mode": manifest["mode"],
     }
     if args.resume:
         metadata["base_checkpoint_hash"] = source_metadata["base_checkpoint_hash"]
@@ -353,12 +388,23 @@ def main(argv=None):
     timings = []
     start_wall = time.perf_counter()
     last_saved = completed
+    checkpoint_seconds = []
+    stop_requested = False
     torch.cuda.reset_peak_memory_stats(device)
+
+    def request_stop(signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+        logging.warning("Received signal %d; will save after the current effective batch", signum)
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
 
     def persist():
         nonlocal last_saved
         if completed == last_saved:
             return
+        checkpoint_start = time.perf_counter()
         checkpoint = save_checkpoint(
             output / str(completed),
             model=model,
@@ -383,6 +429,18 @@ def main(argv=None):
         )
         if removed:
             logging.info("Pruned older recovery checkpoints: %s", removed)
+        elapsed = time.perf_counter() - checkpoint_start
+        checkpoint_seconds.append(elapsed)
+        _append(
+            output / "checkpoint_metrics.jsonl",
+            {
+                "optimizer_updates": completed,
+                "seconds": elapsed,
+                "bytes": sum(path.stat().st_size for path in checkpoint.rglob("*") if path.is_file()),
+                "checkpoint": str(checkpoint),
+                "run_mode": manifest["mode"],
+            },
+        )
 
     while completed < target:
         torch.cuda.synchronize(device)
@@ -440,11 +498,10 @@ def main(argv=None):
             logging.info("update=%d loss=%.5f lr=%.3g seconds=%.3f", completed, loss_total, rate, elapsed)
         if not args.profile_updates and completed % args.save_every == 0:
             persist()
-        if args.max_hours is not None and time.perf_counter() - start_wall >= args.max_hours * 3600:
+        if stop_requested or (args.max_hours is not None and time.perf_counter() - start_wall >= args.max_hours * 3600):
             logging.warning("Run time limit reached; saving a partial run at an optimizer boundary")
             break
-    if not args.profile_updates:
-        persist()
+    persist()  # Profiles also measure one complete checkpoint publication.
     if timings:
         mean_seconds = statistics.mean(timings)
         report = {
@@ -461,17 +518,27 @@ def main(argv=None):
             "completed_updates": completed,
             "requested_updates": updates,
             "completed_reference_run": not args.profile_updates and completed == config.num_train_steps,
+            "stop_requested": stop_requested,
             "warmup_updates": args.profile_warmup if args.profile_updates else 0,
             "timed_updates": len(timings),
             "mean_seconds_per_update": mean_seconds,
             "median_seconds_per_update": statistics.median(timings),
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
             "peak_reserved_bytes": torch.cuda.max_memory_reserved(device),
+            "checkpoint_seconds": checkpoint_seconds,
+            "total_memory_bytes": torch.cuda.get_device_properties(device).total_memory,
+            "checkpoint_measurements": str(output / "checkpoint_metrics.jsonl"),
             "forecast_one_reference_run": cost_forecast(mean_seconds, config.num_train_steps, args.hourly_rate),
             "forecast_three_same_method_seeds": cost_forecast(
                 mean_seconds, config.num_train_steps, args.hourly_rate, runs=3
             ),
-            "forecast_excludes": ["setup", "checkpoint I/O", "evaluation", "storage", "other architectures"],
+            "forecast_excludes": [
+                "setup",
+                "checkpoint I/O (reported separately)",
+                "evaluation",
+                "storage",
+                "other architectures",
+            ],
         }
         write_json(output / "profile.json", report)
         logging.info("Measured forecast: %s", json.dumps(report))

@@ -49,6 +49,13 @@ def _research_metadata(cell):
         "freeze_vlm": True,
         "action_horizon": 10,
         "action_dim": 32,
+        "base_checkpoint_hash": "b" * 64,
+        "data_manifest_sha256": "d" * 64,
+        "source_snapshot_sha256": "e" * 64,
+        "container_image_id": "sha256:fixture-model",
+        "model_sha256": ev.content_digest(cell["checkpoint_id"]),
+        "normalization_hash": "a" * 64,
+        "resume_signature": {"microbatch_size": 4, "effective_batch_size": 256},
     }
 
 
@@ -89,6 +96,41 @@ def _records(manifest):
                         },
                     }
                 )
+    if manifest.get("require_provenance", not manifest.get("diagnostic", False)):
+        for row in records:
+            metadata = row["server_metadata"]
+            metadata.update(
+                checkpoint_sha256=ev.content_digest(row["checkpoint_id"]),
+                normalization_sha256="a" * 64,
+                matmul_precision="highest",
+                runtime={"container_image": "sha256:fixture-model", "gpu": "fixture"},
+            )
+            provenance = {
+                "schema_version": 1,
+                "protocol_id": ev.PROTOCOL_ID,
+                "server_metadata": copy.deepcopy(metadata),
+                "source": {"commit": "f" * 40, "source_sha256": "e" * 64, "tracked_changes": ""},
+                "simulator_commit": "a" * 40,
+                "simulator_assets": {"assets": {"files": 1, "sha256": "f" * 64}},
+                "container_image": "sha256:fixture-simulator",
+                "settings": {
+                    key: row[key]
+                    for key in ("suite", "num_steps", "rollout_seed", "paired_noise_seed", "replan_steps", "attempt_id")
+                },
+                "tasks": [
+                    {
+                        "task_id": task,
+                        "bddl_sha256": "b" * 64,
+                        "initial_states_sha256": ["c" * 64] * manifest.get("num_trials_per_task", 50),
+                    }
+                    for task in range(manifest.get("num_tasks_per_suite", 10))
+                ],
+            }
+            provenance["settings"].update(
+                render_size=256, resize_size=224, num_steps_wait=10, max_steps=ev.MAX_STEPS[row["suite"]]
+            )
+            row["_provenance"] = provenance
+            row["provenance_sha256"] = ev.content_digest(provenance)
     return records
 
 
@@ -137,7 +179,7 @@ def test_primary_matrix_counts_and_three_independent_seeds():
     )
     assert len(ev.matrix_cells(manifest)) * 500 == 40000
     manifest["variants"].pop(0)
-    with pytest.raises(ValueError, match="three training seeds"):
+    with pytest.raises(ValueError, match="declared training seeds"):
         ev.validate_manifest(manifest)
 
 
@@ -196,7 +238,7 @@ def test_bootstrap_preserves_pairs_and_known_difference():
     left, right = _sides(_records(_manifest()))
     equal = ev.paired_bootstrap(left, right, resamples=100)
     assert equal["ci95"] == [0.0, 0.0]
-    assert equal["bootstrap_equivalent"]
+    assert "bootstrap_equivalent" not in equal
     for row in left:
         row["success"] = True
     for row in right:
@@ -204,7 +246,7 @@ def test_bootstrap_preserves_pairs_and_known_difference():
     result = ev.paired_bootstrap(left, right, resamples=100)
     assert result["difference_left_minus_right"] == 1.0
     assert result["ci95"] == [1.0, 1.0]
-    assert not result["bootstrap_equivalent"]
+    assert "equivalence_margin" not in result
 
 
 def test_bootstrap_reproducible_and_accounts_for_training_seeds():
@@ -290,7 +332,7 @@ def test_validation_checks_server_attestation_and_actual_noise_schedule(corrupti
         ev.validate_results(records, manifest)
 
 
-@pytest.mark.parametrize("inference_failure", [False, True])
+@pytest.mark.parametrize("inference_failure", [False, True, "nan", "shape", "structured", "video"])
 def test_official_runner_logs_and_sends_paired_noise_with_fake_simulator(tmp_path, monkeypatch, inference_failure):
     """Exercise the changed runner without importing any real simulator libraries."""
     import numpy as np
@@ -341,12 +383,24 @@ def test_official_runner_logs_and_sends_paired_noise_with_fake_simulator(tmp_pat
 
         def infer(self, observation):
             received.append(observation["noise_seed"])
-            if inference_failure:
+            if inference_failure is True:
                 raise RuntimeError("Test server failure")
+            if inference_failure == "structured":
+                return {
+                    "policy_error": {"type": "invalid_actions", "message": "nonfinite"},
+                    "policy_timing": {"infer_ms": 12.0, "total_ms": 15.0},
+                }
+            if inference_failure in {"nan", "shape"}:
+                actions = np.full((10, 7), np.nan) if inference_failure == "nan" else np.zeros((9, 7))
+                return {"actions": actions, "policy_timing": {"infer_ms": 12.0, "total_ms": 15.0}}
             return {"actions": np.zeros((10, 7)), "policy_timing": {"infer_ms": 12.0, "total_ms": 15.0}}
 
+    def write_video(*args, **kwargs):
+        if inference_failure == "video":
+            raise OSError("Video destination unavailable")
+
     modules = {
-        "imageio": {"mimwrite": lambda *args, **kwargs: None},
+        "imageio": {"mimwrite": write_video},
         "libero": {},
         "libero.libero": {
             "benchmark": types.SimpleNamespace(get_benchmark_dict=lambda: {"libero_spatial": FakeSuite}),
@@ -380,10 +434,10 @@ def test_official_runner_logs_and_sends_paired_noise_with_fake_simulator(tmp_pat
         num_steps=1,
         paired_noise_seed=7,
         num_trials_per_task=2,
-        save_videos=False,
+        save_videos=inference_failure == "video",
         video_out_path=str(tmp_path / "videos"),
     )
-    if inference_failure:
+    if inference_failure is True:
         with pytest.raises(RuntimeError, match="logged execution error"):
             runner.eval_libero(args)
         failed = ev.read_episodes([log])
@@ -395,7 +449,13 @@ def test_official_runner_logs_and_sends_paired_noise_with_fake_simulator(tmp_pat
     rows = ev.read_episodes([log])
     assert len(rows) == 2
     assert received == [ev.paired_noise_seed(7, "libero_spatial/0", state, 0) for state in range(2)]
-    assert all(row["success"] and row["steps"] == 1 and row["action_horizon"] == 10 for row in rows)
+    if inference_failure in {"nan", "shape", "structured"}:
+        assert all(not row["success"] and row["failure_kind"] == "policy" for row in rows)
+        assert all(row["failure_tags"] == ["invalid_actions"] for row in rows)
+    else:
+        assert all(row["success"] and row["steps"] == 1 and row["action_horizon"] == 10 for row in rows)
+    if inference_failure == "video":
+        assert all(row["artifact_errors"][0]["kind"] == "video_error" and not row["failure_tags"] for row in rows)
     manifest = {
         "schema_version": 1,
         "diagnostic": True,
@@ -444,8 +504,10 @@ def _cell_rows(records, cell):
 
 
 def _write_rows(path, rows):
+    if rows and rows[0].get("_provenance"):
+        ev.write_provenance(path, rows[0]["_provenance"])
     for row in rows:
-        ev.append_episode(path, row)
+        ev.append_episode(path, {key: value for key, value in row.items() if key != "_provenance"})
 
 
 def test_resume_validates_cell_without_relaxing_original_primary_manifest(tmp_path):
@@ -553,7 +615,7 @@ def test_resume_runs_only_pending_suite_and_appends_server_log(tmp_path, monkeyp
         _write_rows(cells[1]["episode_log_path"], _cell_rows(rows, cells[1]))
 
     monkeypatch.setattr(module.subprocess, "Popen", FakeProcess)
-    monkeypatch.setattr(module.subprocess, "run", run_client)
+    monkeypatch.setattr(module, "_run_client", run_client)
     monkeypatch.setattr(module.socket, "create_connection", connection_refused)
     monkeypatch.setattr(module, "_wait_for_server", lambda *args: None)
     module.execute(manifest, resume_completed_suites=True)
@@ -561,6 +623,48 @@ def test_resume_runs_only_pending_suite_and_appends_server_log(tmp_path, monkeyp
     assert json.loads(capsys.readouterr().out)["episodes"] == 12
     assert server_log.read_text(encoding="utf-8").startswith("previous server attempt\n")
     assert "new server attempt output" in server_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("needs_kill", [False, True])
+def test_client_timeout_gives_wrapper_a_cleanup_grace_period(tmp_path, monkeypatch, needs_kill):
+    module = _load_script("evaluate_potential")
+    events = []
+
+    class Process:
+        running = True
+
+        def poll(self):
+            return None if self.running else 0
+
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
+            if timeout == 1 or (timeout == 30 and needs_kill):
+                raise module.subprocess.TimeoutExpired("fixture", timeout)
+            self.running = False
+            return 0
+
+        def terminate(self):
+            events.append("terminate")
+
+        def kill(self):
+            events.append("kill")
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: Process())
+    with pytest.raises(module.subprocess.TimeoutExpired):
+        module._run_client(["fixture"], cwd=tmp_path, env={}, timeout=1)  # noqa: SLF001
+    expected = [("wait", 1), "terminate", ("wait", 30)]
+    if needs_kill:
+        expected.extend(["kill", ("wait", None)])
+    assert events == expected
+
+
+def test_completed_process_is_not_signalled(monkeypatch):
+    module = _load_script("evaluate_potential")
+    process = types.SimpleNamespace(
+        poll=lambda: 0,
+        terminate=lambda: pytest.fail("Completed processes must not be signalled"),
+    )
+    module._stop_process(process)  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
@@ -639,3 +743,104 @@ def test_resume_primary_cell_cannot_hide_partial_training_behind_diagnostic_vali
     module = _load_script("evaluate_potential")
     with pytest.raises(ValueError, match="Actual checkpoint optimizer_updates"):
         module.commands(manifest, resume_completed_suites=True)
+
+
+def test_pilot_keeps_all_tasks_and_exposure_but_labels_single_seed():
+    root = Path(__file__).resolve().parents[2]
+    manifest = json.loads((root / "configs/potential/libero_matrix.pilot.json").read_text())
+    assert len(ev.matrix_cells(manifest)) * 500 == 16000
+    assert manifest["training_seeds"] == [42]
+    manifest.pop("study_kind")
+    with pytest.raises(ValueError, match="explicitly labeled"):
+        ev.validate_manifest(manifest)
+
+
+def test_bootstrap_holds_tasks_fixed_and_labels_one_seed_uncertainty():
+    manifest = _manifest()
+    manifest["variants"] = [v for v in manifest["variants"] if v["training_seed"] == 0]
+    left, right = _sides(_records(manifest))
+    for row in left:
+        row["success"] = row["task_id"] == 0
+    for row in right:
+        row["success"] = row["task_id"] == 1
+    result = ev.paired_bootstrap(left, right, resamples=100)
+    assert result["difference_left_minus_right"] == 0
+    assert result["ci95"] == [0, 0]  # Resampling tasks would introduce spurious variation here.
+    assert result["training_seed_variability_estimated"] is False
+    assert "not estimated" in result["scope"]
+
+
+def test_fresh_suite_attempt_preserves_previous_log(tmp_path):
+    manifest = _manifest()
+    manifest["output_dir"] = str(tmp_path)
+    original = ev.matrix_cells(manifest)[0]
+    _write_rows(original["episode_log_path"], _cell_rows(_records(manifest), original)[:1])
+    manifest["suite_attempts"] = {"B1-0/k1/libero_spatial": "retry-02"}
+    replacement = ev.matrix_cells(manifest)[0]
+    assert Path(original["episode_log_path"]).exists()
+    assert Path(replacement["episode_log_path"]).parent.name == "retry-02"
+    plan = _load_script("evaluate_potential").commands(manifest)
+    client = plan[0]["clients"][0]["argv"]
+    assert client[client.index("--args.attempt-id") + 1] == "retry-02"
+
+
+def test_provenance_roundtrip_detects_changed_sidecar(tmp_path):
+    manifest = _manifest()
+    manifest.update(require_provenance=True, output_dir=str(tmp_path))
+    manifest["variants"] = manifest["variants"][:1]
+    manifest["num_steps"] = [1]
+    rows = _records(manifest)
+    path = ev.matrix_cells(manifest)[0]["episode_log_path"]
+    _write_rows(path, rows)
+    loaded = ev.read_episodes([path])
+    assert ev.validate_results(loaded, manifest)["episodes"] == 6
+    sidecar = Path(path).with_suffix(".provenance.json")
+    provenance = json.loads(sidecar.read_text())
+    provenance["server_metadata"]["normalization_sha256"] = "9" * 64
+    sidecar.write_text(json.dumps(provenance))
+    with pytest.raises(ValueError, match="changed provenance"):
+        ev.read_episodes([path])
+
+
+@pytest.mark.parametrize("field", ["normalization_sha256", "checkpoint_sha256", "matmul_precision"])
+def test_provenance_binds_episode_server_metadata(field):
+    manifest = _manifest()
+    manifest["require_provenance"] = True
+    rows = _records(manifest)
+    rows[0]["server_metadata"][field] = "changed"
+    with pytest.raises(ValueError, match="differs from its provenance"):
+        ev.validate_results(rows, manifest)
+
+
+def test_provenance_rejects_different_research_normalization():
+    manifest = _manifest()
+    manifest["require_provenance"] = True
+    rows = _records(manifest)
+    changed = next(row for row in rows if row["group"] == "P")
+    changed["server_metadata"]["normalization_sha256"] = "9" * 64
+    changed["server_metadata"]["research"]["normalization_hash"] = "9" * 64
+    changed["_provenance"]["server_metadata"] = copy.deepcopy(changed["server_metadata"])
+    changed["provenance_sha256"] = ev.content_digest(changed["_provenance"])
+    with pytest.raises(ValueError, match="different normalization"):
+        ev.validate_results(rows, manifest)
+
+
+@pytest.mark.parametrize("field", ["checkpoint_sha256", "normalization_sha256"])
+def test_provenance_rejects_served_bytes_that_differ_from_trainer_receipt(field):
+    manifest = _manifest()
+    manifest["require_provenance"] = True
+    rows = _records(manifest)
+    row = rows[0]
+    row["server_metadata"][field] = "9" * 64
+    row["_provenance"]["server_metadata"] = copy.deepcopy(row["server_metadata"])
+    row["provenance_sha256"] = ev.content_digest(row["_provenance"])
+    with pytest.raises(ValueError, match="differs from the trainer"):
+        ev.validate_results(rows, manifest)
+
+
+def test_profile_checkpoint_cannot_enter_confirmatory_evaluation():
+    manifest = _manifest()
+    rows = _records(manifest)
+    rows[0]["server_metadata"]["research"]["run_mode"] = "profile"
+    with pytest.raises(ValueError, match="Profiling checkpoints"):
+        ev.validate_results(rows, manifest, require_primary_checkpoint=True)

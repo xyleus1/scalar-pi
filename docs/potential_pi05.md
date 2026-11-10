@@ -4,6 +4,8 @@ This research extension changes the **whole action expert's output parameterizat
 
 The source baseline is OpenPI commit `215abfb217dbac7d5f1273282331b9b1866c0479`. The checked-in implementation and CPU tests are not evidence of GPU fit, training convergence, or LIBERO performance. No real-model training budget is established until a complete GPU update and rollout profile have been measured. The current local Windows machine has no NVIDIA GPU available for that qualification.
 
+The current execution target is Lambda. Follow [the Lambda runbook](lambda.md) for private authentication, pinned containers, staging, qualification, measured full/pilot selection, and user-launched sessions. This is a matched frozen-backbone PyTorch adaptation study, not a reproduction of full-VLM fine-tuning. All research training/profiling requires the verified dataset manifest, staged tokenizer, a clean committed checkout, and the actual `SCALAR_PI_IMAGE_ID`; the Lambda wrapper supplies the image identity automatically.
+
 ## 1. Architectural graph and scientific intervention
 
 ```text
@@ -141,6 +143,8 @@ Ten Euler steps are the official OpenPI sampler default. They are a reference se
 - Retain per-episode JSONL records, failure reasons and checkpoint identity.
 - Three groups by three seeds by two solver settings by 2,000 episodes gives **36,000 research rollouts**. The supplied matrix adds the released reference at both K values, giving **40,000 total episodes**.
 
+The predeclared primary contrast is P minus B1 at K=10; P minus B0 and K=1 are secondary. If the measured complete study exceeds $2,000, use the seed-42 pilot with the same three arms, all tasks/states and 30,000 updates, totaling 16,000 episodes including the released reference. If the pilot also exceeds the ceiling, stop. Policy-caused invalid actions count as failures; infrastructure interruptions remain separate attempts. Fixed-task paired bootstrap intervals do not establish equivalence or training-seed variability from a one-seed pilot.
+
 All 40 task identities occur in the training data. Do not describe the result as unseen-task generalization. Curl/Hessian checks validate construction; task success validates behavior. A loss-only gain does not establish a control gain. A nonsignificant difference is not evidence of equivalence.
 
 ## 5. Canonical environment
@@ -175,15 +179,15 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export WANDB_MODE=offline
 ```
 
-Download using the existing providers, and pin the resolved dataset revision in a manifest. The preparation utility requires an immutable revision, hashes the dataset files and writes the trainer's manifest. It performs no download without the explicit `--download` flag. Resolve and record a full dataset commit, then use it in this command:
+Download using the existing providers and retain the pinned dataset revision in a manifest. The preparation utility requires an immutable revision, hashes the dataset files and writes the trainer's manifest. It performs no download without the explicit `--download` flag. The Lambda study stages this exact revision:
 
 ```bash
-uv run --no-sync python -c "from huggingface_hub import HfApi; print(HfApi().dataset_info('physical-intelligence/libero').sha)"
 uv run --no-sync python scripts/prepare_potential_data.py \
-  --revision FULL_DATASET_COMMIT_FROM_ABOVE \
+  --revision a4336d589d589045d1c56423ffdf3b88a0e19b1f \
   --dataset-root "$HF_LEROBOT_HOME/physical-intelligence/libero" \
   --output data/libero_manifest.json --download
 uv run --no-sync python -c "from openpi.shared.download import maybe_download; print(maybe_download('gs://openpi-assets/checkpoints/pi05_base'))"
+uv run --no-sync python -c "from openpi.models.tokenizer import PaligemmaTokenizer; PaligemmaTokenizer()"
 ```
 
 The source data currently advertises 1,693 episodes, 273,465 frames and 40 tasks. Verify downloaded metadata and retain file hashes rather than assuming a future repository head has identical content. Preserve dataset and pretrained-model license notices.
@@ -200,9 +204,12 @@ uv run --no-sync python examples/convert_jax_model_to_pytorch.py \
 
 Audit the conversion key/shape report and hash the resulting checkpoint. Successful file creation alone does not establish conversion parity. The action-expert constructor must be FP32 before weights are loaded. The upstream converter's generic `config.json` is not architecture metadata for a trained potential policy.
 
-Compute quantile statistics with the official script on the full training data, once, then copy the same small statistics file to the other research config asset locations:
+Verify the local manifest, enable offline dataset access, then compute quantile statistics with the unchanged official script once and copy the same statistics file to the other research config asset locations. The official batch-256 iterator processes 273,408 windows and omits the final 57; retain that behavior. The tokenizer must already be staged because its GCS download is independent of the Hugging Face offline flags.
 
 ```bash
+uv run --no-sync python scripts/prepare_potential_data.py --manifest data/libero_manifest.json
+export HF_HUB_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
 uv run --no-sync python scripts/compute_norm_stats.py --config-name pi05_libero_b0
 uv run --no-sync python - <<'PY'
 from pathlib import Path
@@ -213,7 +220,12 @@ for config in ("pi05_libero_b1", "pi05_libero_potential"):
     target.parent.mkdir(parents=True, exist_ok=True)
     copy2(source, target)
 PY
+uv run --no-sync python scripts/prepare_potential_data.py \
+  --audit --manifest data/libero_manifest.json \
+  --audit-output data/libero_audit.json --corpus-output data/policy_corpus.npz
 ```
+
+The audit decodes every official-loader window, checks metadata, image ranges, finite states/actions and episode boundaries, and compares beginning/middle/end transformed samples against upstream `pi05_libero` before model augmentation. It verifies action-window padding within each episode. The new NPZ contains one deterministic middle-frame observation per task and fixed noise, with no image orientation change. A corpus export refuses to overwrite an existing file; retain its audit receipt and hash for reuse.
 
 ## 7. Preflight, profiling, training and resume
 
@@ -235,21 +247,26 @@ Run the executable full-size GPU correctness diagnostic before training. It load
 ```bash
 uv run --no-sync python scripts/qualify_potential.py \
   --checkpoint checkpoints/pi05_base_torch --checkpoint-kind base \
+  --corpus data/policy_corpus.npz \
+  --norm-stats assets/pi05_libero_b0/physical-intelligence/libero/norm_stats.json \
   --report data/gpu_qualification.json
 ```
 
-If gradient checkpointing will be used, repeat with `--gradient-checkpointing` and a new report filename. Use `--checkpoint-kind research` to check a trained potential checkpoint with mandatory architecture metadata. This diagnostic uses full-shape synthetic images, token masks and actions, so its JSON records `synthetic_input: true` and explicitly excludes training-cost and benchmark validity. The default two warmup and ten recorded calls per K are adjustable diagnostic counts, not literature-derived evaluation settings. Inspect its allocated/reserved memory series; it intentionally assigns no arbitrary memory-leak pass threshold. No full-size GPU qualification has been run on the current CPU-only machine.
+If gradient checkpointing will be used, repeat with `--gradient-checkpointing` and a new report filename. Use `--checkpoint-kind research` to check a trained potential checkpoint with mandatory architecture metadata and omit `--norm-stats` so the saved checkpoint assets are used. Derivative probes use synthetic inputs; separate actual-policy serving checks use the audited real-observation corpus and native transforms. The report retains `synthetic_input: true` and excludes training-cost and benchmark validity. The default two warmup and ten recorded calls per K are adjustable diagnostic counts, not literature-derived evaluation settings. Inspect its allocated/reserved memory series; it intentionally assigns no arbitrary memory-leak pass threshold. No full-size GPU qualification has been run on the current CPU-only machine.
 
 Profile each group in a separate experiment directory. The following performs actual complete optimizer updates; it is not an inference-only timing loop:
 
 ```bash
 uv run --no-sync python scripts/train_potential.py pi05_libero_potential \
   --exp-name profile_potential --weights checkpoints/pi05_base_torch \
+  --data-manifest data/libero_manifest.json \
   --microbatch-size 1 --seed 42 --profile-warmup 10 --profile-updates 100 \
   --hourly-rate ACTUAL_PROVIDER_RATE
 ```
 
 Repeat for B0 and B1. Inspect peak allocated/reserved memory, complete update time, finite loss and gradients, frozen-weight checks and output metadata. Choose the common microbatch based on the potential model's measured fit, then use that same microbatch, accumulation, effective batch and numerical settings for all groups.
+
+Each profile also writes one final diagnostic checkpoint and records its I/O duration separately. Profiling checkpoints cannot initialize or resume a research training run. The Lambda selector first tests common microbatch fit; its two-update candidates are diagnostics and cannot replace the 100-update cost profiles.
 
 Reference training example:
 
@@ -269,7 +286,7 @@ uv run --no-sync python scripts/train_potential.py pi05_libero_potential \
   --microbatch-size 1 --seed 42 --data-manifest data/libero_manifest.json
 ```
 
-The checkpoint must retain optimizer, EMA, RNG, scheduler/data position, normalization and architecture metadata. Do not treat weights-only reload as an exact resume.
+The checkpoint must retain optimizer, EMA, RNG, scheduler/data position, normalization and architecture metadata. Resume also requires the same source commit/hash, container, optimizer definition, package versions, hardware identity, microbatch and precision settings. The dataset is byte-verified before constructing the loader, then its actual loaded root is checked. Do not treat weights-only reload as an exact resume. SIGTERM/SIGINT request a save after the current effective batch; the run remains incomplete until it reaches 30,000 updates.
 
 The trainer keeps the two most recent owned recovery checkpoints by default (`--keep-last-checkpoints 2`) and preserves the terminal reference checkpoint. Retention changes storage use, not which checkpoint is selected for evaluation.
 
@@ -302,11 +319,11 @@ python scripts/analyze_potential.py configs/potential/libero_matrix.example.json
   --compare P:B1 --compare P:B0 --output results/potential/analysis.json
 ```
 
-The first command is a dry run. Use the resume command only after an interrupted matrix: it skips a suite only after validating its complete log against the exact expected cell, rejects partial/duplicate/error/mismatched logs and validates the full matrix at completion. Partial suite results must be retained for diagnosis and rerun into a fresh results location; they are never silently counted as complete. Primary matrices require B0, B1, P and the released reference; reduced matrices must be explicitly diagnostic. Analysis must reject incomplete, duplicate or mismatched episode records. The evaluator's latency summaries include cold requests; a separate warmed, synchronized timing run is needed for steady-state latency claims. The implemented 90% confidence-interval equivalence criterion is not a computed TOST p-value.
+The first command is a dry run. Use resume only after an interrupted matrix: it skips validated complete suites and rejects partial, duplicated, infrastructure-interrupted or mismatched logs. Preserve incomplete attempts and explicitly select a fresh suite attempt in the manifest. Full and pilot matrices require B0, B1, P and the released reference; task-limited matrices must be diagnostic. Analysis uses fixed-task paired 95% intervals and makes no default equivalence declaration. Rollout latency includes cold calls and simulator sharing; use `benchmark_potential.py` for separate warmed, synchronized timing.
 
 ## 9. Budget gate
 
-The total cloud ceiling is $2,000. Do not assert that the full reference recipe fits before measuring it. A gradient-accumulated batch of 256 is substantially more expensive than timing a microbatch.
+The total cloud ceiling is $2,000. Do not assert that the full recipe fits before measuring it. A gradient-accumulated batch of 256 is substantially more expensive than timing a microbatch. For Lambda use `--select-study` and the per-arm/K/suite template `configs/potential/measured_budget.example.json`; this includes checkpoint I/O and subtracts only artifact-verified completed work. The older aggregate profile below is retained for simple estimates, not full/pilot selection.
 
 `potential_preflight.py --profile` accepts a combined measurement record with:
 

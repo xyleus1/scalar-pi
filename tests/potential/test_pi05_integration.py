@@ -6,6 +6,7 @@ adaptive normalization, cache, potential, and double backward are production cod
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from transformers import GemmaForCausalLM
@@ -190,3 +191,113 @@ def test_zero_head_controls_match_and_begin_learning(tiny_model):
     assert torch.count_nonzero(potential) == 0
     (potential - 1).square().mean().backward()
     assert torch.count_nonzero(model.action_out_proj.weight.grad) > 0
+
+
+@pytest.mark.parametrize("vlm_dtype", [torch.float32, torch.bfloat16])
+def test_parity_diagnostic_exercises_actual_joint_and_cached_velocity(tiny_model, vlm_dtype):
+    from scripts.check_potential_parity import torch_joint_velocity
+
+    model, observation = tiny_model
+    model.configure_expert_only(vlm_dtype=torch.float32)
+    model.eval()
+    model.velocity_mode = "direct"
+    actions = torch.randn(2, 3, 4)
+    time = torch.tensor([0.2, 0.8])
+    with torch.no_grad():
+        joint = torch_joint_velocity(model, observation, actions, time)
+        model.configure_expert_only(vlm_dtype=vlm_dtype)
+        cached = model.predict_velocity(actions, time, model.encode_context(observation))
+    tolerance = 2e-2 if vlm_dtype == torch.bfloat16 else 1e-4
+    torch.testing.assert_close(joint, cached, atol=tolerance, rtol=tolerance)
+
+
+def test_actual_policy_loader_sets_research_precision_and_retains_input_gradients(tiny_model, monkeypatch, tmp_path):
+    import hashlib
+
+    from openpi import transforms
+    from openpi.policies import policy_config
+    from openpi.shared import normalize
+    from openpi.shared.normalize import NormStats
+
+    model, _ = tiny_model
+    original = model._preprocess_observation  # noqa: SLF001
+
+    def single_observation(obs, *, train):
+        images, image_masks, tokens, masks, state = original(obs, train=train)
+        return [value[:1] for value in images], [value[:1] for value in image_masks], tokens[:1], masks[:1], state
+
+    monkeypatch.setattr(model, "_preprocess_observation", single_observation)
+    model.config.load_pytorch = lambda config, path: model
+    model.config.model_type = SimpleNamespace()
+    data = SimpleNamespace(
+        asset_id="test", data_transforms=transforms.Group(), model_transforms=transforms.Group(), use_quantile_norm=True
+    )
+    config = SimpleNamespace(
+        name="pi05_libero_potential",
+        model=model.config,
+        assets_dirs=tmp_path,
+        data=SimpleNamespace(create=lambda *_: data),
+        policy_metadata=None,
+    )
+    monkeypatch.setattr(policy_config.download, "maybe_download", lambda path: tmp_path)
+    (tmp_path / "model.safetensors").write_bytes(b"fixture weights loaded by stub")
+    norms = {"state": NormStats(mean=np.zeros(4), std=np.ones(4), q01=-np.ones(4), q99=np.ones(4))}
+    receipt = {
+        "schema_version": 1,
+        "trainer": "potential_pi",
+        "model_sha256": hashlib.sha256(b"fixture weights loaded by stub").hexdigest(),
+        "normalization_hash": hashlib.sha256(normalize.serialize_json(norms).encode()).hexdigest(),
+    }
+    monkeypatch.setattr(policy_config, "validate_checkpoint_metadata", lambda *_, **__: receipt)
+    monkeypatch.setenv("OPENPI_DATA_HOME", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="Stage the PaliGemma tokenizer"):
+        policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
+    tokenizer = tmp_path / "big_vision/paligemma_tokenizer.model"
+    tokenizer.parent.mkdir()
+    tokenizer.write_bytes(b"fixture tokenizer unused by stub transforms")
+    torch.set_float32_matmul_precision("high")
+    policy = policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
+    assert torch.get_float32_matmul_precision() == "highest"
+    assert policy.metadata["matmul_precision"] == "highest"
+    assert policy.metadata["checkpoint_sha256"] == hashlib.sha256(b"fixture weights loaded by stub").hexdigest()
+    assert len(policy.metadata["normalization_sha256"]) == 64
+    result = policy.infer(
+        {
+            "image": {"fixture": np.zeros((14, 14, 3), dtype=np.uint8)},
+            "image_mask": {"fixture": np.True_},
+            "state": np.zeros(4, dtype=np.float32),
+        },
+        noise=np.zeros((3, 4), dtype=np.float32),
+    )
+    assert np.isfinite(result["actions"]).all()
+    assert result["actions"].shape == (3, 4)
+    assert all(parameter.grad is None and not parameter.requires_grad for parameter in model.parameters())
+    receipt["model_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="EMA receipt"):
+        policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
+    receipt["model_sha256"] = policy.metadata["checkpoint_sha256"]
+    receipt["normalization_hash"] = "0" * 64
+    with pytest.raises(ValueError, match="training receipt"):
+        policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
+
+
+@pytest.mark.parametrize("mode", ["direct", "potential_dot"])
+def test_zero_head_update_activates_trunk_gradients(tiny_model, mode):
+    model, observation = tiny_model
+    model.velocity_mode = mode
+    model.zero_action_output()
+    context = model.encode_context(observation)
+    time = torch.tensor([0.2, 0.8])
+    actions = torch.randn(2, 3, 4)
+    first = model.predict_velocity(actions.clone().requires_grad_(requires_grad=True), time, context, create_graph=True)
+    (first - 1).square().mean().backward()
+    with torch.no_grad():
+        model.action_out_proj.weight.add_(model.action_out_proj.weight.grad, alpha=-1e-3)
+    model.zero_grad(set_to_none=True)
+    second = model.predict_velocity(
+        actions.clone().requires_grad_(requires_grad=True), time, context, create_graph=True
+    )
+    (second - 1).square().mean().backward()
+    trunk = [p.grad for name, p in model.expert_modules().named_parameters() if not name.startswith("action_out_proj.")]
+    assert all(gradient is not None and torch.isfinite(gradient).all() for gradient in trunk)
+    assert any(torch.count_nonzero(gradient) for gradient in trunk)

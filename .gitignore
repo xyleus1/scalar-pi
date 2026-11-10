@@ -132,6 +132,8 @@ celerybeat.pid
 .venv
 .venv-cpu/
 research_outputs/
+results/
+.lambda/
 .pytest-evaluation-tmp-*/
 env/
 venv/

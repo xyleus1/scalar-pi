@@ -12,14 +12,87 @@ from collections import defaultdict
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import statistics
+import subprocess
 from typing import Any
 
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520, "libero_90": 400}
-PROTOCOL_ID = "openpi-libero-paired-v1"
+PROTOCOL_ID = "openpi-libero-paired-v2"
+POLICY_FAILURE_TAGS = {"timeout", "invalid_actions"}
+
+
+def content_digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+
+def file_digest(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def tree_digest(root: str | Path) -> dict[str, Any]:
+    root = Path(root)
+    files = {str(path.relative_to(root)): file_digest(path) for path in sorted(root.rglob("*")) if path.is_file()}
+    if not files:
+        raise ValueError(f"No simulator assets found in {root}")
+    return {"files": len(files), "sha256": content_digest(files)}
+
+
+def source_identity(root: str | Path) -> dict[str, Any]:
+    """Record actual tracked source bytes, including a mounted checkout's local changes."""
+    root = Path(root)
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    files = {
+        name: file_digest(root / name)
+        for name in git("ls-files").splitlines()
+        if name.endswith((".py", ".json", ".toml", ".lock")) and (root / name).is_file()
+    }
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "tracked_changes": git("status", "--porcelain", "--untracked-files=no"),
+        "source_sha256": content_digest(files),
+    }
+
+
+def write_provenance(log_path: str | Path, provenance: dict[str, Any]) -> str:
+    """Write one immutable sidecar per suite attempt, not one large payload per episode."""
+    path = Path(log_path).with_suffix(".provenance.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8") as stream:
+        json.dump(provenance, stream, indent=2, sort_keys=True, allow_nan=False)
+        stream.write("\n")
+    return content_digest(provenance)
+
+
+def suite_provenance(*, server_metadata: dict, settings: dict, tasks: list[dict], simulator_paths: dict) -> dict:
+    """Bind an evaluation attempt to model bytes, simulator assets, and numerical settings."""
+    root = Path(__file__).resolve().parents[3]
+    simulator_root = root / "third_party/libero"
+    return {
+        "schema_version": 1,
+        "protocol_id": PROTOCOL_ID,
+        "server_metadata": server_metadata,
+        "source": source_identity(root),
+        "simulator_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=simulator_root, check=True, capture_output=True, text=True
+        ).stdout.strip(),
+        "simulator_assets": {name: tree_digest(path) for name, path in sorted(simulator_paths.items())},
+        "container_image": os.environ.get("SCALAR_PI_SIMULATOR_IMAGE", ""),
+        "settings": settings,
+        "tasks": tasks,
+    }
 
 
 def paired_noise_seed(seed: int, task: str, initial_state: int, query_index: int) -> int:
@@ -47,6 +120,8 @@ def append_episode(path: str | Path, record: dict[str, Any]) -> None:
 def read_episodes(paths: list[str | Path]) -> list[dict[str, Any]]:
     records = []
     for path in paths:
+        sidecar = Path(path).with_suffix(".provenance.json")
+        provenance = json.loads(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else None
         with Path(path).open(encoding="utf-8") as stream:
             for line_no, line in enumerate(stream, 1):
                 if not line.strip():
@@ -55,6 +130,10 @@ def read_episodes(paths: list[str | Path]) -> list[dict[str, Any]]:
                     record = json.loads(line)
                     if not isinstance(record, dict):
                         raise ValueError("Episode must be an object")
+                    if record.get("provenance_sha256"):
+                        if provenance is None or content_digest(provenance) != record["provenance_sha256"]:
+                            raise ValueError("Missing or changed provenance sidecar")
+                        record["_provenance"] = provenance
                     records.append(record)
                 except (ValueError, TypeError) as exc:
                     raise ValueError(f"Invalid episode at {path}:{line_no}: {exc}") from exc
@@ -62,7 +141,7 @@ def read_episodes(paths: list[str | Path]) -> list[dict[str, Any]]:
 
 
 def validate_manifest(manifest: dict[str, Any]) -> None:
-    """Validate a complete primary matrix; reduced runs must be labeled diagnostic."""
+    """Check the declared study; a one-seed pilot retains the complete benchmark."""
     if manifest.get("schema_version") != 1:
         raise ValueError("Manifest schema_version must be 1")
     for field in ("rollout_seed", "paired_noise_seed"):
@@ -71,6 +150,9 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     diagnostic = manifest.get("diagnostic", False)
     if type(diagnostic) is not bool:
         raise ValueError("diagnostic must be a JSON boolean")
+    require_provenance = manifest.get("require_provenance", not diagnostic)
+    if type(require_provenance) is not bool or (not diagnostic and not require_provenance):
+        raise ValueError("Benchmark studies require provenance; only diagnostic runs may disable it")
     suites = manifest.get("suites", list(SUITES))
     steps = manifest.get("num_steps", [1, 10])
     trials = manifest.get("num_trials_per_task", 50)
@@ -81,8 +163,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise ValueError("num_steps must contain unique positive integers")
     if type(trials) is not int or not 1 <= trials <= 50 or type(tasks) is not int or not 1 <= tasks <= 10:
         raise ValueError("Require 1..50 initial states and 1..10 tasks per suite")
-    if not diagnostic and (set(suites) != set(SUITES) or set(steps) != {1, 10} or trials != 50 or tasks != 10):
-        raise ValueError("Primary matrix requires all four suites, 10 tasks, 50 trials, and K={1,10}")
+    if not diagnostic and (set(suites) != set(SUITES) or 10 not in steps or trials != 50 or tasks != 10):
+        raise ValueError("Primary matrix requires all four suites, 10 tasks, 50 trials, and primary K=10")
     variants = manifest.get("variants", [])
     if not variants:
         raise ValueError("Manifest requires variants")
@@ -119,33 +201,58 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         if len(set(seeds)) != len(seeds):
             raise ValueError(f"Duplicate training seed in {group}")
     if not diagnostic:
+        if manifest.get("study_kind", "replicated") not in {"replicated", "pilot"}:
+            raise ValueError("study_kind must be replicated or pilot")
         if set(groups) != {"B0", "B1", "P"} or references != ["reference"]:
             raise ValueError("Primary matrix requires B0, B1, P, and one released reference group")
         expected_seeds = manifest.get("training_seeds", [17, 42, 93])
         if (
-            len(expected_seeds) != 3
-            or len(set(expected_seeds)) != 3
+            not expected_seeds
+            or len(set(expected_seeds)) != len(expected_seeds)
             or any(type(seed) is not int for seed in expected_seeds)
         ):
-            raise ValueError("This primary protocol declares three independently trained seeds")
+            raise ValueError("Declare unique integer training seeds")
+        if len(expected_seeds) == 1 and manifest.get("study_kind") != "pilot":
+            raise ValueError("A single training seed must be explicitly labeled study_kind=pilot")
+        if manifest.get("study_kind") == "pilot" and len(expected_seeds) != 1:
+            raise ValueError("The declared pilot uses one training seed")
         if any(set(seeds) != set(expected_seeds) for seeds in groups.values()):
-            raise ValueError("Each trained group must contain exactly the declared three training seeds")
+            raise ValueError("Each trained group must contain exactly the declared training seeds")
+    for attempt in manifest.get("suite_attempts", {}).values():
+        if (
+            not isinstance(attempt, str)
+            or not attempt
+            or attempt in {".", ".."}
+            or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in attempt)
+        ):
+            raise ValueError("Suite attempt IDs must be filesystem-safe identifiers")
 
 
 def matrix_cells(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     validate_manifest(manifest)
     output_dir = Path(manifest.get("output_dir", "results/potential"))
-    return [
-        {
-            **variant,
-            "num_steps": steps,
-            "suite": suite,
-            "episode_log_path": str(output_dir / variant["checkpoint_id"] / f"k{steps}" / f"{suite}.jsonl"),
-        }
-        for variant in manifest["variants"]
-        for steps in manifest.get("num_steps", [1, 10])
-        for suite in manifest.get("suites", list(SUITES))
-    ]
+    cells = []
+    for variant in manifest["variants"]:
+        for steps in manifest.get("num_steps", [1, 10]):
+            for suite in manifest.get("suites", list(SUITES)):
+                key = f"{variant['checkpoint_id']}/k{steps}/{suite}"
+                attempt = manifest.get("suite_attempts", {}).get(key, "initial")
+                directory = output_dir / variant["checkpoint_id"] / f"k{steps}"
+                if attempt != "initial":
+                    directory /= attempt
+                cells.append(
+                    {
+                        **variant,
+                        "num_steps": steps,
+                        "suite": suite,
+                        "attempt_id": attempt,
+                        "episode_log_path": str(directory / f"{suite}.jsonl"),
+                    }
+                )
+    declared = set(manifest.get("suite_attempts", {}))
+    if declared - {f"{c['checkpoint_id']}/k{c['num_steps']}/{c['suite']}" for c in cells}:
+        raise ValueError("suite_attempts contains a cell outside the declared matrix")
+    return cells
 
 
 def _record_key(record: dict[str, Any]) -> tuple:
@@ -160,6 +267,8 @@ def _validate_checkpoint_record(record: dict[str, Any], *, primary: bool) -> Non
         return
     if not isinstance(research, dict):
         raise ValueError(f"Missing or invalid actual checkpoint research metadata: {record['checkpoint_id']}")
+    if primary and research.get("run_mode") == "profile":
+        raise ValueError("Profiling checkpoints cannot enter confirmatory evaluation")
     expected = {"training_seed": record["training_seed"]}
     if primary:
         if record["group"] not in {"B0", "B1", "P"}:
@@ -182,6 +291,53 @@ def _validate_checkpoint_record(record: dict[str, Any], *, primary: bool) -> Non
             raise ValueError(f"Actual checkpoint {field}={actual!r}, expected {value!r}: {record['checkpoint_id']}")
 
 
+def validate_provenance(record: dict[str, Any]) -> dict:
+    provenance = record.get("_provenance")
+    if not isinstance(provenance, dict) or content_digest(provenance) != record.get("provenance_sha256"):
+        raise ValueError("Missing or changed evaluation provenance")
+    if provenance.get("schema_version") != 1 or provenance.get("protocol_id") != PROTOCOL_ID:
+        raise ValueError("Unknown evaluation provenance schema or protocol")
+    metadata = record["server_metadata"]
+    if provenance.get("server_metadata") != metadata:
+        raise ValueError("Episode metadata differs from its provenance")
+    for field in ("checkpoint_sha256", "normalization_sha256"):
+        digest = metadata.get(field, "")
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError(f"Missing actual {field} in server provenance")
+    if not record.get("reference", False):
+        research = metadata.get("research") or {}
+        for actual, receipt in (("checkpoint_sha256", "model_sha256"), ("normalization_sha256", "normalization_hash")):
+            if metadata[actual] != research.get(receipt):
+                raise ValueError(f"Actual served {actual} differs from the trainer's {receipt} receipt")
+    if not record.get("reference", False) and metadata.get("matmul_precision") != "highest":
+        raise ValueError("Research serving must use the declared highest matmul precision")
+    if not provenance.get("container_image") or not metadata.get("runtime", {}).get("container_image"):
+        raise ValueError("Record both model and simulator container identities")
+    source = provenance.get("source", {})
+    if not source.get("commit") or not source.get("source_sha256") or source.get("tracked_changes") != "":
+        raise ValueError("Evaluation requires a clean, identified source checkout")
+    if not provenance.get("simulator_commit") or not provenance.get("simulator_assets"):
+        raise ValueError("Missing simulator source or asset identity")
+    settings = provenance.get("settings", {})
+    for field in ("suite", "num_steps", "rollout_seed", "paired_noise_seed", "replan_steps", "attempt_id"):
+        if settings.get(field) != record.get(field, "initial" if field == "attempt_id" else None):
+            raise ValueError(f"Provenance settings mismatch: {field}")
+    for field, value in {
+        "render_size": 256,
+        "resize_size": 224,
+        "num_steps_wait": 10,
+        "max_steps": MAX_STEPS[record["suite"]],
+    }.items():
+        if settings.get(field) != value:
+            raise ValueError(f"Provenance native LIBERO setting mismatch: {field}")
+    tasks = {task["task_id"]: task for task in provenance.get("tasks", [])}
+    task = tasks.get(record["task_id"], {})
+    states = task.get("initial_states_sha256", [])
+    if not task.get("bddl_sha256") or not 0 <= record["initial_state_id"] < len(states):
+        raise ValueError("Missing task definition or official initial-state identity")
+    return provenance
+
+
 def validate_results(
     records: list[dict[str, Any]],
     manifest: dict[str, Any],
@@ -200,6 +356,12 @@ def validate_results(
         for state in range(trials)
     }
     seen = set()
+    matched_environment = None
+    matched_normalization = None
+    matched_training = None
+    matched_runtime = None
+    matched_tasks = {}
+    cell_attempts = {(c["checkpoint_id"], c["num_steps"], c["suite"]): c["attempt_id"] for c in cells}
     for record in records:
         try:
             key = _record_key(record)
@@ -231,9 +393,13 @@ def validate_results(
         wanted_id = episode_id(record["suite"], record["task_id"], record["initial_state_id"], record["rollout_seed"])
         if record.get("episode_id") != wanted_id or type(record.get("success")) is not bool:
             raise ValueError(f"Invalid episode ID or success label for {key}")
-        errors = set(record.get("failure_tags", [])) - {"timeout"}
+        errors = set(record.get("failure_tags", [])) - POLICY_FAILURE_TAGS
         if errors:
             raise ValueError(f"Execution errors require investigation before statistics: {key}: {sorted(errors)}")
+        if record.get("failure_kind") == "infrastructure":
+            raise ValueError(f"Infrastructure attempt cannot enter policy statistics: {key}")
+        if record.get("failure_tags") and record["success"]:
+            raise ValueError(f"A policy failure cannot be labeled successful: {key}")
         metadata = record.get("server_metadata", {})
         for field, value in {
             "checkpoint_id": record["checkpoint_id"],
@@ -246,6 +412,50 @@ def validate_results(
             record,
             primary=require_primary_checkpoint or not manifest.get("diagnostic", False),
         )
+        if record.get("attempt_id", "initial") != cell_attempts[key[:3]]:
+            raise ValueError(f"Attempt differs from the explicitly selected suite attempt: {key}")
+        if manifest.get("require_provenance", not manifest.get("diagnostic", False)):
+            provenance = validate_provenance(record)
+            environment = {
+                field: provenance[field]
+                for field in ("source", "simulator_commit", "simulator_assets", "container_image")
+            }
+            if matched_environment is not None and environment != matched_environment:
+                raise ValueError("Evaluation source, simulator assets, or container changed within the matrix")
+            matched_environment = environment
+            suite = record["suite"]
+            if suite in matched_tasks and provenance["tasks"] != matched_tasks[suite]:
+                raise ValueError("Task definitions or initial-state order changed between checkpoints")
+            matched_tasks[suite] = provenance["tasks"]
+            if not record.get("reference", False):
+                normalization = metadata["normalization_sha256"]
+                if matched_normalization is not None and normalization != matched_normalization:
+                    raise ValueError("Research variants used different normalization assets")
+                matched_normalization = normalization
+                research = metadata["research"]
+                training = {
+                    field: research.get(field)
+                    for field in (
+                        "base_checkpoint_hash",
+                        "data_manifest_sha256",
+                        "source_snapshot_sha256",
+                        "container_image_id",
+                    )
+                }
+                if any(not value for value in training.values()):
+                    raise ValueError("Missing training data/base/source/container identity")
+                signature = research.get("resume_signature", {})
+                if not signature:
+                    raise ValueError("Missing actual training protocol signature")
+                training["protocol"] = {
+                    name: value for name, value in signature.items() if name not in {"config", "seed", "initialization"}
+                }
+                if matched_training is not None and training != matched_training:
+                    raise ValueError("Research variants used different training data, base, source, or protocol")
+                matched_training = training
+                if matched_runtime is not None and metadata.get("runtime") != matched_runtime:
+                    raise ValueError("Research serving runtime changed within the matrix")
+                matched_runtime = metadata.get("runtime")
         queries = record.get("policy_queries")
         if type(queries) is not int or queries < 1:
             raise ValueError(f"Invalid policy query count: {key}")
@@ -260,7 +470,10 @@ def validate_results(
         if len(record.get("latencies", [])) != queries:
             raise ValueError(f"Missing policy latency records: {key}")
         for timing in record["latencies"]:
-            if not isinstance(timing, dict) or not {"client_roundtrip_ms", "infer_ms", "total_ms"}.issubset(timing):
+            required_timings = {"client_roundtrip_ms"}
+            if "invalid_actions" not in record.get("failure_tags", []):
+                required_timings.update(("infer_ms", "total_ms"))
+            if not isinstance(timing, dict) or not required_timings.issubset(timing):
                 raise ValueError(f"Missing required policy latency fields: {key}")
             if any(
                 not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0
@@ -305,6 +518,7 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
             "successes": sum(row["success"] for row in rows),
             "success_rate": statistics.mean(float(row["success"]) for row in rows),
             "failure_tags": dict(Counter(tag for row in rows for tag in row.get("failure_tags", []))),
+            "artifact_errors": dict(Counter(error["kind"] for row in rows for error in row.get("artifact_errors", []))),
             "latency_ms": {
                 name: {"count": len(values), "mean": statistics.mean(values), "p95": _percentile(values, 0.95)}
                 for name, values in sorted(timings.items())
@@ -327,6 +541,20 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
         }
         for (section, checkpoint_id, steps), items in sorted(checkpoint_groups.items())
     ]
+    task_groups = defaultdict(list)
+    for row in records:
+        task_groups[(row["checkpoint_id"], row["num_steps"], row["suite"], row["task_id"])].append(row)
+    result["tasks"] = [
+        {
+            "checkpoint_id": checkpoint_id,
+            "num_steps": steps,
+            "suite": suite,
+            "task_id": task,
+            "episodes": len(rows),
+            "success_rate": statistics.mean(float(row["success"]) for row in rows),
+        }
+        for (checkpoint_id, steps, suite, task), rows in sorted(task_groups.items())
+    ]
     return result
 
 
@@ -336,16 +564,14 @@ def paired_bootstrap(
     *,
     resamples: int = 10000,
     random_seed: int = 0,
-    equivalence_margin: float = 0.03,
 ) -> dict[str, Any]:
-    """Paired crossed seed/task/episode bootstrap, with suites held fixed.
+    """Paired seed/state bootstrap for equally weighted, fixed benchmark tasks.
 
-    Training seeds and tasks are crossed: each sampled task/episode draw is shared
-    across sampled seeds and both methods. This preserves pairing. The 90% CI
-    margin check is a bootstrap equivalence criterion, not a claimed TOST p-value.
+    Initial-state draws are shared across sampled training seeds and both methods.
+    A one-seed interval measures state variation, not training-seed uncertainty.
     """
-    if resamples < 100 or not 0 < equivalence_margin < 1:
-        raise ValueError("Require at least 100 resamples and a margin in (0,1)")
+    if resamples < 100:
+        raise ValueError("Require at least 100 resamples")
 
     def index(rows):
         indexed = {}
@@ -391,7 +617,7 @@ def paired_bootstrap(
         for suite in suite_names:
             tasks = sorted(grid[suite])
             task_means = []
-            for task in rng.choices(tasks, k=len(tasks)):
+            for task in tasks:
                 states = sorted(grid[suite][task])
                 sampled_states = rng.choices(states, k=len(states))
                 task_means.append(
@@ -401,17 +627,25 @@ def paired_bootstrap(
             suite_means.append(statistics.mean(task_means))
         draws.append(statistics.mean(suite_means))
     ci95 = [_percentile(draws, 0.025), _percentile(draws, 0.975)]
-    ci90 = [_percentile(draws, 0.05), _percentile(draws, 0.95)]
+    point = statistics.mean(
+        statistics.mean(
+            statistics.mean(differences[(seed, suite, task, state)] for seed in seeds for state in states)
+            for task, states in grid[suite].items()
+        )
+        for suite in suite_names
+    )
     return {
-        "difference_left_minus_right": statistics.mean(differences.values()),
+        "difference_left_minus_right": point,
         "ci95": ci95,
-        "ci90": ci90,
-        "equivalence_margin": equivalence_margin,
-        "bootstrap_equivalent": ci90[0] > -equivalence_margin and ci90[1] < equivalence_margin,
         "resamples": resamples,
         "random_seed": random_seed,
         "training_seeds": seeds,
         "paired_episodes": len(li),
-        "method": "paired crossed training-seed/task/episode percentile bootstrap; fixed suites",
-        "scope": "conditional on released checkpoint" if seeds == [None] else "independently trained seed replicates",
+        "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+        "training_seed_variability_estimated": len(seeds) > 1 and seeds != [None],
+        "scope": (
+            "conditional on one checkpoint; training-seed variability is not estimated"
+            if len(seeds) == 1
+            else "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate"
+        ),
     }

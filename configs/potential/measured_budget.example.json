@@ -1,0 +1,89 @@
+{
+  "measured_gpu": false,
+  "model_kind": "pi05_full",
+  "hardware": "REPLACE_WITH_MEASURED_GPU",
+  "measurement_source": "REPLACE_WITH_RETAINED_TRAINING_PROFILE_PATHS",
+  "evaluation_measurement_source": "REPLACE_WITH_RETAINED_ROLLOUT_AND_TIMING_PATHS",
+  "warmup_optimizer_updates": 10,
+  "timed_optimizer_updates": 100,
+  "effective_batch_size": 256,
+  "optimizer_updates": 30000,
+  "seconds_per_optimizer_update": {
+    "B0": null,
+    "B1": null,
+    "P": null
+  },
+  "checkpoint_seconds_per_save": {
+    "B0": null,
+    "B1": null,
+    "P": null
+  },
+  "checkpoint_interval_updates": {
+    "B0": null,
+    "B1": null,
+    "P": null
+  },
+  "experiment_identity": {},
+  "completed_training": [],
+  "completed_evaluation": [],
+  "fixed_cost_usd": null,
+  "evaluation_seconds_per_episode": {
+    "B0": {
+      "1": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      },
+      "10": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      }
+    },
+    "B1": {
+      "1": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      },
+      "10": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      }
+    },
+    "P": {
+      "1": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      },
+      "10": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      }
+    },
+    "reference": {
+      "1": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      },
+      "10": {
+        "libero_spatial": null,
+        "libero_object": null,
+        "libero_goal": null,
+        "libero_10": null
+      }
+    }
+  },
+  "notes": "Unmeasured template: deliberately rejected. Use complete real-data batch-256 update profiles. Measure checkpoint_seconds_per_save for each arm; set checkpoint_interval_updates to its chosen integer cadence in 1..5000. Per-suite episode durations must conservatively account for timeout-length episodes, model calls, settling/rendering and server startup/checkpoint loading. Set experiment_identity.code_commit and .container_image_id to the pinned source and Docker image. Completed training records contain group, training_seed, optimizer_updates and checkpoint_dir; their actual research metadata and weight hashes are verified. Completed evaluation records contain group, training_seed (null for reference), num_steps, suite and manifest_path; complete 500-episode suite logs and provenance must validate. Fixed cost includes all spending so far plus storage, taxes and remaining noncompute costs. --select-study preserves full 30000-update runs and 40000 or 16000 planned episodes, subtracting only validated completed work. Retain all evidence paths alongside this file."
+}

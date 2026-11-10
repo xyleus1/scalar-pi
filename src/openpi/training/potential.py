@@ -161,7 +161,7 @@ def validate_data_manifest(path: Path, *, repo_id: str, dataset_root: Path) -> d
         for item in (root / folder).rglob("*")
         if item.is_file()
     }
-    if not any(name.startswith("data/") for name in required) or not required.issubset(files):
+    if not any(name.startswith("data/") for name in required) or required != set(files):
         raise ValueError("Dataset manifest does not cover the complete loaded dataset")
     for relative, expected_hash in files.items():
         item = (root / relative).resolve()
@@ -170,6 +170,30 @@ def validate_data_manifest(path: Path, *, repo_id: str, dataset_root: Path) -> d
         if sha256_file(item) != expected_hash:
             raise ValueError(f"Dataset file hash mismatch: {relative}")
     return manifest
+
+
+def prepare_offline_dataset(path: Path, *, repo_id: str = "physical-intelligence/libero") -> dict[str, Any]:
+    """Verify the exact cache root before importing or constructing LeRobot.
+
+    Missing files must fail here rather than reaching LeRobot's download fallback.
+    The caller must invoke this before importing Hugging Face/LeRobot modules,
+    since those libraries read their environment at import time.
+    """
+    cache = Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface"))
+    lerobot_home = Path(os.environ.get("HF_LEROBOT_HOME", cache / "lerobot")).resolve()
+    root = lerobot_home / repo_id
+    manifest = validate_data_manifest(path, repo_id=repo_id, dataset_root=root)
+    os.environ["HF_LEROBOT_HOME"] = str(lerobot_home)
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    return manifest
+
+
+def validate_resume_signature(saved: dict[str, Any], current: dict[str, Any]) -> None:
+    """Fail rather than changing arithmetic, data order, source, or environment mid-run."""
+    changed = sorted(key for key in saved.keys() | current.keys() if saved.get(key) != current.get(key))
+    if changed:
+        raise ValueError(f"Resume protocol differs: {', '.join(changed)}")
 
 
 def validate_base_conversion(directory: Path, *, require_receipt: bool) -> dict[str, Any] | None:
@@ -327,6 +351,7 @@ def load_training_checkpoint(
     velocity_mode: str,
     action_horizon: int,
     action_dim: int,
+    expected_resume_signature: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a checkpoint produced locally by this trainer (contains pickle)."""
     directory = Path(directory)
@@ -338,10 +363,14 @@ def load_training_checkpoint(
     )
     if metadata is None or metadata.get("trainer") != "potential_pi":
         raise ValueError("Resumption requires a complete potential_pi training checkpoint")
+    if expected_resume_signature is not None:
+        validate_resume_signature(metadata.get("resume_signature", {}), expected_resume_signature)
     if sha256_file(directory / "raw_model.safetensors") != metadata["raw_model_sha256"]:
         raise ValueError("Raw model checkpoint hash mismatch")
     safetensors.torch.load_model(model, directory / "raw_model.safetensors", strict=True)
     state = torch.load(directory / "training_state.pt", map_location="cpu", weights_only=False)
+    if expected_resume_signature is not None:
+        validate_resume_signature(state.get("resume_signature", {}), expected_resume_signature)
     if state["optimizer_updates"] != metadata["optimizer_updates"]:
         raise ValueError("Metadata and training state update counts disagree")
     optimizer.load_state_dict(state["optimizer"])

@@ -1,11 +1,13 @@
-"""Qualify full-size potential pi05 CUDA code paths using synthetic observations.
+"""Qualify potential pi05 CUDA derivatives and the actual policy serving loader.
 
 This is a correctness diagnostic, never a training-cost or LIBERO benchmark.
-It does not download assets, update weights, or provision compute.
+Synthetic derivative probes temporarily change and restore the in-memory output
+head. No checkpoint is modified, training run started, or resource provisioned.
 """
 
 import argparse
 import gc
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -20,6 +22,8 @@ def parse_args(argv=None):
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--checkpoint-kind", choices=("base", "research"), default="base")
     parser.add_argument("--config", default="pi05_libero_potential")
+    parser.add_argument("--corpus", type=Path, help="Audited real-observation NPZ; required for CUDA qualification")
+    parser.add_argument("--norm-stats", type=Path, help="Staged LIBERO norms for base-checkpoint serving qualification")
     parser.add_argument("--report", type=Path, default=Path("data/gpu_qualification.json"))
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
@@ -36,6 +40,17 @@ def parse_args(argv=None):
     if args.report.exists():
         parser.error("--report already exists; choose a new report path")
     return args
+
+
+def _parameter_digest(module):
+    import torch
+
+    digest = hashlib.sha256()
+    for name, parameter in module.named_parameters():
+        digest.update(name.encode())
+        raw = parameter.detach().contiguous().view(-1).view(torch.uint8).cpu().numpy()
+        digest.update(raw.tobytes())
+    return digest.hexdigest()
 
 
 def _git_head():
@@ -55,6 +70,12 @@ def _qualify(args, report):
 
     if not torch.cuda.is_available():
         raise RuntimeError("Full-size qualification requires CUDA; CPU fixtures are separate tests.")
+    if args.corpus is None or not args.corpus.is_file():
+        raise ValueError("--corpus must identify the audited observation NPZ for actual-policy checks")
+    if args.checkpoint_kind == "base" and (args.norm_stats is None or not args.norm_stats.is_file()):
+        raise ValueError("Base qualification requires the staged LIBERO --norm-stats asset")
+    if args.checkpoint_kind == "research" and args.norm_stats is not None:
+        raise ValueError("Research serving must use normalization assets inside its checkpoint")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise RuntimeError("This diagnostic supports one CUDA process only")
     from safetensors import safe_open
@@ -62,8 +83,12 @@ def _qualify(args, report):
 
     from openpi.models import model as model_api
     from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
+    from openpi.research.policy_checks import require_staged_tokenizer
     from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
     from openpi.training import config as configs
+    from openpi.training.potential import validate_base_conversion
+
+    require_staged_tokenizer()
 
     config = configs.get_config(args.config)
     if not config.model.pi05 or not config.model.freeze_vlm or config.model.velocity_mode != "potential_dot":
@@ -80,6 +105,7 @@ def _qualify(args, report):
         raise ValueError("Base qualification must start from converted pi05_base, not a research checkpoint")
     weight_file = args.checkpoint / "model.safetensors"
     if args.checkpoint_kind == "base":
+        validate_base_conversion(args.checkpoint, require_receipt=True)
         with safe_open(weight_file, framework="pt", device="cpu") as weights:
             non_fp32 = [name for name in weights.keys() if weights.get_slice(name).get_dtype() != "F32"]  # noqa: SIM118
         if non_fp32:
@@ -135,6 +161,7 @@ def _qualify(args, report):
         }
     )
 
+    vlm_digest = _parameter_digest(model.paligemma_with_expert.paligemma)
     model.train()
     loss = model(observation, actions, noise=noise, time=time).mean()
     if not torch.isfinite(loss):
@@ -183,6 +210,7 @@ def _qualify(args, report):
     model.zero_action_output()
     zero_results = {}
     for mode in ("potential_dot", "direct"):
+        model.zero_action_output()
         model.velocity_mode = mode
         x = noise.clone().requires_grad_(requires_grad=True)
         velocity = model.predict_velocity(x, time, context, create_graph=True)
@@ -192,14 +220,40 @@ def _qualify(args, report):
         head_grad = model.action_out_proj.weight.grad
         if head_grad is None or not torch.isfinite(head_grad).all() or not torch.count_nonzero(head_grad):
             raise RuntimeError(f"Zero-output {mode} control cannot begin learning")
-        zero_results[mode] = {"zero_velocity": True, "nonzero_finite_head_gradient": True}
+        # One temporary head update tests that the zero initialization does not
+        # permanently disconnect the pretrained trunk. Restore below; no artifact
+        # or optimizer state from this synthetic probe is used for training.
+        with torch.no_grad():
+            model.action_out_proj.weight.add_(head_grad, alpha=-1e-3)
         model.zero_grad(set_to_none=True)
         del x, velocity, head_grad
+        x = noise.clone().requires_grad_(requires_grad=True)
+        velocity = model.predict_velocity(x, time, context, create_graph=True)
+        (velocity - 1).square().mean().backward()
+        trunk = [
+            parameter.grad
+            for name, parameter in model.expert_modules().named_parameters()
+            if not name.startswith("action_out_proj.")
+        ]
+        if not trunk or any(gradient is None or not torch.isfinite(gradient).all() for gradient in trunk):
+            raise RuntimeError(f"{mode} trunk gradients are missing or nonfinite after a head update")
+        if not any(torch.count_nonzero(gradient) for gradient in trunk):
+            raise RuntimeError(f"{mode} trunk did not begin learning after a head update")
+        zero_results[mode] = {
+            "zero_velocity": True,
+            "nonzero_finite_head_gradient": True,
+            "nonzero_finite_trunk_gradients_after_head_update": True,
+        }
+        model.zero_grad(set_to_none=True)
+        del x, velocity, trunk
     with torch.no_grad():
         model.action_out_proj.weight.copy_(head_weight)
         model.action_out_proj.bias.copy_(head_bias)
     model.velocity_mode = "potential_dot"
     report["checks"]["zero_output_controls"] = zero_results
+    if _parameter_digest(model.paligemma_with_expert.paligemma) != vlm_digest:
+        raise RuntimeError("Frozen VLM weights changed during derivative qualification")
+    report["checks"]["frozen_vlm_weights_unchanged"] = True
     del head_weight, head_bias, context
 
     memory = {}
@@ -245,14 +299,63 @@ def _qualify(args, report):
         raise RuntimeError("Inference unexpectedly populated parameter gradients")
     report["checks"]["k1_k10_repeatable_finite_detached_inference"] = True
     report["inference_memory"] = memory
-    report["correctness_checks_passed"] = True
+
+
+def _qualify_policy(args, report):
+    import numpy as np
+    import torch
+
+    from openpi.policies.policy_config import create_trained_policy
+    from openpi.research.policy_checks import corpus_observation
+    from openpi.research.policy_checks import file_digest
+    from openpi.research.policy_checks import load_corpus
+    from openpi.shared import normalize
+    from openpi.training.config import get_config
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    corpus = load_corpus(args.corpus)
+    config = get_config("pi05_libero_b0" if args.checkpoint_kind == "base" else args.config)
+    norms = normalize.deserialize_json(args.norm_stats.read_text()) if args.norm_stats is not None else None
+    serving = {}
+    for steps in (1, 10):
+        policy = create_trained_policy(
+            config,
+            args.checkpoint,
+            norm_stats=norms,
+            sample_kwargs={"num_steps": steps},
+            pytorch_device="cuda:0",
+        )
+        if policy.metadata["matmul_precision"] != "highest" or torch.get_float32_matmul_precision() != "highest":
+            raise RuntimeError("Actual serving loader disagrees with qualified arithmetic")
+        first = None
+        for index in range(len(corpus["states"])):
+            output = policy.infer(corpus_observation(corpus, index), noise=corpus["noise"][index])
+            if output.get("policy_error") or not np.isfinite(output["actions"]).all():
+                raise RuntimeError("Actual serving produced invalid actions on the audited corpus")
+            if index == 0:
+                first = output["actions"].copy()
+        repeated = policy.infer(corpus_observation(corpus, 0), noise=corpus["noise"][0])
+        np.testing.assert_array_equal(first, repeated["actions"])
+        if any(parameter.requires_grad or parameter.grad is not None for parameter in policy._model.parameters()):  # noqa: SLF001
+            raise RuntimeError("Serving action derivatives unexpectedly enabled parameter gradients")
+        serving[str(steps)] = {"passed": True, "observations": len(corpus["states"]), "policy": policy.metadata}
+        del policy
+        gc.collect()
+        torch.cuda.empty_cache()
+    report["actual_policy_serving"] = {
+        "passed": True,
+        "corpus_sha256": file_digest(args.corpus),
+        "num_steps": serving,
+        "scope": "direct base bridge" if args.checkpoint_kind == "base" else "trained potential checkpoint",
+    }
 
 
 def main(argv=None):
     args = parse_args(argv)
     report = {
         "schema_version": 1,
-        "purpose": "full_size_cuda_synthetic_correctness",
+        "purpose": "full_size_cuda_derivatives_and_serving",
         "synthetic_input": True,
         "valid_training_cost_profile": False,
         "valid_benchmark_evaluation": False,
@@ -267,8 +370,9 @@ def main(argv=None):
         "warmup_repetitions": args.warmup,
         "recorded_repetitions": args.repeats,
         "limitations": [
-            "Synthetic inputs are not LIBERO observations or tokenized tasks.",
-            "No optimizer update, dataset iteration, rollout, or training throughput is measured.",
+            "Derivative probes use synthetic inputs; serving checks use the audited real-observation corpus.",
+            "No training run, rollout, or training throughput is measured.",
+            "Base serving qualification checks the direct loader; repeat on a produced potential checkpoint before evaluation.",
             "Short inference memory series do not establish long-run stability.",
         ],
     }
@@ -276,12 +380,14 @@ def main(argv=None):
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
     try:
         _qualify(args, report)
+        _qualify_policy(args, report)
+        report["correctness_checks_passed"] = True
     except Exception as exc:
         report["error"] = {"type": type(exc).__name__, "message": str(exc)}
         traceback.print_exc()
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Wrote synthetic correctness report: {args.report}")
+    print(f"Wrote derivative and serving qualification: {args.report}")
     return 0 if report["correctness_checks_passed"] else 1
 
 

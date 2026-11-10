@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "diagnostic": false,
+  "study_kind": "replicated",
+  "require_provenance": true,
   "training_seeds": [17, 42, 93],
   "suites": ["libero_spatial", "libero_object", "libero_goal", "libero_10"],
   "num_steps": [1, 10],
@@ -13,7 +15,7 @@
   "save_videos": true,
   "server_command_prefix": ["uv", "run", "--no-sync", "python", "scripts/serve_policy.py"],
   "client_command_prefix": ["examples/libero/.venv/bin/python", "examples/libero/main.py"],
-  "notes": "Replace checkpoint_dir placeholders with completed terminal EMA checkpoint directories. Dry-run is the default. This primary matrix has 40000 episodes. Reduced matrices must explicitly set diagnostic=true. --resume-completed-suites skips only complete validated suite logs and rejects partial or invalid logs.",
+  "notes": "Matched frozen-backbone pi0.5 study: P-B1 at K10 is primary; P-B0 and K1 are secondary. Replace paths with terminal 30k EMA checkpoints. Dry-run is default; 40000 episodes. Use libero_matrix.pilot.json for the declared one-seed fallback. require_provenance binds actual checkpoint, normalization, source, containers, and simulator assets. Resume skips only complete validated suites; use suite_attempts to select a fresh attempt after an infrastructure interruption.",
   "variants": [
     {"group": "B0", "training_seed": 17, "checkpoint_id": "B0-seed17", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_B0_SEED17_CHECKPOINT"},
     {"group": "B0", "training_seed": 42, "checkpoint_id": "B0-seed42", "config": "pi05_libero_b0", "checkpoint_dir": "REPLACE_WITH_B0_SEED42_CHECKPOINT"},

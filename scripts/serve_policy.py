@@ -48,6 +48,8 @@ class Args:
 
     # Port to serve the policy on.
     port: int = 8000
+    # Bind locally by default; a remote connection can use an SSH tunnel.
+    host: str = "127.0.0.1"
     # Record the policy's behavior for debugging.
     record: bool = False
     # Keep the solver count explicit and visible to paired evaluation clients.
@@ -134,7 +136,7 @@ def main(args: Args) -> None:
 
     server = websocket_policy_server.WebsocketPolicyServer(
         policy=policy,
-        host="0.0.0.0",
+        host=args.host,
         port=args.port,
         metadata=policy_metadata,
     )

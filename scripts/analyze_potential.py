@@ -16,11 +16,13 @@ def analyze(manifest: dict, *, comparisons: list[str], resamples: int, random_se
     report = {
         "validation": evaluation.validate_results(records, manifest),
         "diagnostic": manifest.get("diagnostic", False),
+        "study_kind": manifest.get("study_kind", "diagnostic" if manifest.get("diagnostic") else "replicated"),
         "summary": evaluation.summarize(records),
         "comparisons": [],
         "notes": [
             "Differences and intervals are fractions; multiply by 100 for percentage points.",
-            "90% bootstrap CI within +/-0.03 is an equivalence criterion, not a TOST p-value.",
+            "Intervals describe fixed, equally weighted benchmark tasks; nonsignificance is not equivalence.",
+            "One-seed pilots cannot estimate training-seed variability.",
             "Latency includes all observed requests, including cold requests; not a warm steady-state benchmark.",
             "Released references are reported separately, not as independent training-seed replicates.",
         ],
@@ -33,6 +35,9 @@ def analyze(manifest: dict, *, comparisons: list[str], resamples: int, random_se
         report["comparisons"].append(
             {
                 "kind": kind,
+                "endpoint": "primary"
+                if (left_group, left_k, right_group, right_k) == ("P", 10, "B1", 10)
+                else "secondary",
                 "left": {"group": left_group, "num_steps": left_k},
                 "right": {"group": right_group, "num_steps": right_k},
                 **result,
@@ -54,7 +59,7 @@ def analyze(manifest: dict, *, comparisons: list[str], resamples: int, random_se
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
-    parser.add_argument("--compare", action="append", default=[], help="Paired architecture contrast, e.g. P:B1")
+    parser.add_argument("--compare", action="append", help="Paired architecture contrast; defaults to P:B1 and P:B0")
     parser.add_argument("--resamples", type=int, default=10000)
     parser.add_argument("--random-seed", type=int, default=0)
     parser.add_argument("--output", type=Path)
@@ -63,7 +68,9 @@ def main() -> None:
     output_dir = Path(manifest.get("output_dir", "results/potential"))
     if not output_dir.is_absolute():
         manifest["output_dir"] = str(Path(__file__).resolve().parents[1] / output_dir)
-    report = analyze(manifest, comparisons=args.compare, resamples=args.resamples, random_seed=args.random_seed)
+    report = analyze(
+        manifest, comparisons=args.compare or ["P:B1", "P:B0"], resamples=args.resamples, random_seed=args.random_seed
+    )
     result = json.dumps(report, indent=2, allow_nan=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

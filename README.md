@@ -2,7 +2,7 @@
 
 Scalar-pi studies a scalar-potential pi0.5 action expert with matched direct-field controls, built on [Physical Intelligence's OpenPI](https://github.com/Physical-Intelligence/openpi).
 
-See the [architecture, experiment protocol, and runbook](docs/potential_pi05.md) for setup, data verification, training, GPU qualification, and paired LIBERO evaluation. **Status:** 121 CPU tests passed; full-size GPU training and real LIBERO evaluation have not yet been run.
+See the [architecture and experiment protocol](docs/potential_pi05.md) and the [Lambda execution runbook](docs/lambda.md). The Lambda tools prepare a matched frozen-backbone pi0.5 study with verified offline data, full/pilot budget gates, paired LIBERO evaluation, and user-launched jobs. **Status (2026-11-10):** 268 CPU regression tests passed; full-size GPU qualification, training, and real LIBERO evaluation have not yet been run.
 
 The original OpenPI and model license files are retained. The documentation below is inherited from OpenPI.
 

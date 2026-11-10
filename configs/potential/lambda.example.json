@@ -1,0 +1,14 @@
+{
+  "key_loader": "REPLACE_WITH_PRIVATE_POWERSHELL_LOADER",
+  "ssh_key_path": "REPLACE_WITH_PRIVATE_SSH_KEY_PATH",
+  "operator_cidr": "REPLACE_WITH_YOUR_IPV4/32",
+  "image_id": "REPLACE_WITH_GPU_BASE_22_04_X86_64_IMAGE_ID",
+  "region": "us-west-3",
+  "instance_type": "gpu_1x_h100_pcie",
+  "max_hourly_rate_usd": 3.29,
+  "budget_usd": 2000,
+  "qualification_budget_usd": 100,
+  "noncompute_spent_usd": 0,
+  "noncompute_reserve_usd": 100,
+  "credits_verified": false
+}
