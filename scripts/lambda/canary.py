@@ -32,12 +32,30 @@ def command(*argv):
     return subprocess.check_output(argv, text=True, timeout=30).strip()
 
 
+def validate_mount(root, mounts):
+    root = root.resolve()
+    if root == Path("/") or len(mounts) != 1:
+        raise RuntimeError("Expected one distinct mount for the attached Lambda filesystem")
+    mount = mounts[0]
+    target = mount.get("target")
+    if not target or Path(target).resolve() != root:
+        raise RuntimeError("Lambda filesystem mount target does not match the requested root")
+    if not mount.get("source") or mount.get("fstype") not in ("nfs", "nfs4", "virtiofs"):
+        raise RuntimeError("Expected the attached persistent Lambda filesystem")
+    return mount
+
+
 def probe(root, destination, boot_id):
     report = {"schema_version": 1, "passed": False, "started_unix": time.time(), "boot_id": boot_id}
     try:
-        report["filesystem_type"] = command("findmnt", "-T", str(root), "-n", "-o", "FSTYPE")
-        if report["filesystem_type"] not in ("nfs", "nfs4"):
-            raise RuntimeError("Expected the attached persistent Lambda filesystem")
+        # --mountpoint does not fall back to an ancestor (including the guest root).
+        report["filesystem_mounts"] = json.loads(
+            command(
+                "findmnt", "--json", "--mountpoint", str(root.resolve()), "--output", "TARGET,SOURCE,FSTYPE,OPTIONS"
+            )
+        )["filesystems"]
+        mount = validate_mount(root, report["filesystem_mounts"])
+        report["filesystem_type"] = mount["fstype"]
         report["gpu"] = command("nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader")
         if len(report["gpu"].splitlines()) != 1 or "H100" not in report["gpu"]:
             raise RuntimeError("Expected exactly one H100")

@@ -255,6 +255,34 @@ def test_failed_ssh_still_terminates_and_records_cost(cloud, config, tmp_path, m
     assert any(method == "POST" and endpoint.endswith("terminate") for method, endpoint, _ in client.calls)
 
 
+def test_report_ledger_write_failure_still_terminates_instance(cloud, config, tmp_path, monkeypatch):
+    client = FakeLambda(config)
+    state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
+    script = tmp_path / "phase.sh"
+    script.write_text("exit 0\n")
+    args = SimpleNamespace(max_hours=1, stage="qualification", budget_report=None, commit="a" * 40, script=script)
+    save_state = cloud.save_state
+
+    def fail_report_save(path, ledger):
+        if ledger["runs"] and ledger["runs"][0].get("reports_downloaded") and not ledger["runs"][0].get("ended_unix"):
+            raise OSError("Cannot persist report status")
+        save_state(path, ledger)
+
+    monkeypatch.setattr(cloud, "save_state", fail_report_save)
+    monkeypatch.setattr(cloud.subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        cloud.subprocess,
+        "Popen",
+        lambda *_a, **_k: SimpleNamespace(stdin=io.BytesIO(), poll=lambda: 0, returncode=0),
+    )
+    with pytest.raises(OSError, match="Cannot persist report status"):
+        cloud.run_session(client, config, state, tmp_path / "state.json", args)
+    assert client.status == "terminated"
+    persisted = json.loads((tmp_path / "state.json").read_text())["runs"][0]
+    assert persisted["ended_unix"] >= persisted["started_unix"]
+    assert persisted["reports_downloaded"] is True
+
+
 def test_ssh_readiness_timeout_still_terminates_instance(cloud, config, tmp_path, monkeypatch):
     client = FakeLambda(config)
     script = tmp_path / "phase.sh"
@@ -274,11 +302,13 @@ def test_ssh_readiness_timeout_still_terminates_instance(cloud, config, tmp_path
 
 def test_launch_never_uploads_api_key(cloud, config, monkeypatch):
     monkeypatch.setenv("LAMBDA_API_KEY", "fixture-secret-never-upload")
-    payload = cloud.launch_body(config, {}, "a" * 40, "scalar-pi-owned")
+    payload = cloud.launch_body(config, {"resources": {"filesystem_id": "owned-fs"}}, "a" * 40, "scalar-pi-owned")
     assert "fixture-secret" not in json.dumps(payload)
     assert "203.0.113.1/32" in payload["user_data"]
     assert "8000" not in payload["user_data"]
     assert "0.0.0.0/0" not in payload["user_data"]
+    assert payload["file_system_mounts"] == [{"file_system_id": "owned-fs", "mount_point": cloud.REMOTE_ROOT}]
+    assert "file_system_names" not in payload
 
 
 def test_phase_allowance_includes_previous_sessions_and_headroom(cloud, config):

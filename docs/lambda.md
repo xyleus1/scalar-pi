@@ -90,10 +90,14 @@ files from `data/experiments/reports`, and terminates the recorded instance in a
 & $lambda run --script scripts/lambda/prepare.sh --commit $commit --max-hours 2 --execute
 ```
 
-The canary checks SSH, the attached NFS mount, GPU identity, host resources,
+The canary checks SSH, the exact attached filesystem mount, GPU identity, host resources,
 Docker, and its NVIDIA runtime. It writes a checksummed marker and terminates
 without fetching model weights, data, or running a simulator. The next instance
 must verify that marker on a different boot before staging begins.
+Launch requests bind the ledger's filesystem ID to `/lambda/nfs/scalar-pi`.
+The probe records the mount source, target, type, and options; it accepts NFS
+and virtiofs but rejects a result for an ancestor such as the guest root.
+This validates the mount configuration, not persistence across a new instance.
 
 Sessions are supervised: the canary is limited to 15 minutes, qualification to
 two hours, and research to four hours. Work completion ends the session early.

@@ -325,7 +325,7 @@ def launch_body(config, state, commit, name):
         "region_name": config["region"],
         "instance_type_name": config["instance_type"],
         "ssh_key_names": ["scalar-pi"],
-        "file_system_names": ["scalar-pi"],
+        "file_system_mounts": [{"file_system_id": state["resources"]["filesystem_id"], "mount_point": REMOTE_ROOT}],
         "image": {"id": config["image_id"]},
         "name": name,
         "user_data": user_data,
@@ -439,6 +439,10 @@ def run_session(client, config, state, state_path, args):
     pending = {
         "name": name,
         "commit": args.commit,
+        "instance_type": config["instance_type"],
+        "region": config["region"],
+        "filesystem_id": state["resources"]["filesystem_id"],
+        "filesystem_mount_point": REMOTE_ROOT,
         "started_unix": started,
         "hourly_rate_usd": rate,
         "stage": args.stage,
@@ -570,7 +574,12 @@ def run_session(client, config, state, state_path, args):
                     except (OSError, subprocess.TimeoutExpired):
                         pass
             finally:
-                terminate(client, state, state_path, instance_id)
+                # Keep downloaded evidence recorded even if provider termination
+                # takes longer than this controller's confirmation window.
+                try:
+                    save_state(state_path, state)
+                finally:
+                    terminate(client, state, state_path, instance_id)
 
 
 def main(argv=None):
