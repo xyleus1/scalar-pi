@@ -45,19 +45,29 @@ class FakeLambda:
         self.config = config
         self.status = "active"
         self.name = "scalar-pi-owned"
+        self.price_cents_per_hour = 329
 
     def request(self, method, endpoint, body=None):
         self.calls.append((method, endpoint, body))
         if endpoint == "instance-types":
             return {
                 self.config["instance_type"]: {
-                    "instance_type": {"price_cents_per_hour": 329, "specs": {"gpus": 1}, "architecture": "x86_64"},
-                    "regions_with_capacity_available": [{"name": "us-west-3"}],
+                    "instance_type": {
+                        "price_cents_per_hour": self.price_cents_per_hour,
+                        "specs": {"gpus": 1},
+                        "architecture": "x86_64",
+                    },
+                    "regions_with_capacity_available": [{"name": self.config["region"]}],
                 }
             }
         if endpoint == "images":
             return [
-                {"id": "a" * 32, "architecture": "x86_64", "family": "gpu-base-22-04", "region": {"name": "us-west-3"}}
+                {
+                    "id": "a" * 32,
+                    "architecture": "x86_64",
+                    "family": "gpu-base-22-04",
+                    "region": {"name": self.config["region"]},
+                }
             ]
         if endpoint == "instance-operations/launch":
             self.name = body["name"]
@@ -395,6 +405,75 @@ def test_approved_retry_preserves_spending_and_reserve(cloud, canary_config):
     assert canary_config["credits_verified"] is False
 
 
+def test_provider_charge_reconciles_budget_without_rewriting_elapsed_estimate(cloud, canary_config):
+    canary_config.update(canary_allowance_usd=5, forecast_hourly_rate_usd=4.89, max_hourly_rate_usd=4.89)
+    first = {"started_unix": 0, "ended_unix": 17 * 60, "hourly_rate_usd": 3.29, "stage": "canary"}
+    first["estimated_compute_usd"] = cloud.session_cost(first)
+    second = {"started_unix": 0, "ended_unix": 36 * 60, "hourly_rate_usd": 3.29, "stage": "canary"}
+    state = {"runs": [first, second]}
+    with pytest.raises(ValueError, match="Cumulative canary"):
+        cloud.check_allowance(canary_config, state, 0.25, 4.29, "canary")
+    first.update(provider_compute_upper_usd=0.13, provider_compute_source="fixture: retained provider Usage receipt")
+    recorded = first.copy()
+    allowance = cloud.check_allowance(canary_config, state, 0.25, 4.29, "canary")
+    assert allowance["spent_usd"] == pytest.approx(0.13 + 1.974)
+    assert allowance["canary_with_reserve_usd"] == pytest.approx(4.321)
+    assert cloud.session_cost(first) == first["estimated_compute_usd"]
+    assert first == recorded
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"ended_unix": None},
+        {"provider_compute_source": None},
+        {"provider_compute_source": " "},
+        {"provider_compute_upper_usd": -0.01},
+        {"provider_compute_upper_usd": float("nan")},
+        {"provider_compute_upper_usd": float("inf")},
+        {"provider_compute_upper_usd": True},
+        {"provider_compute_upper_usd": "0.13"},
+    ],
+)
+def test_provider_charge_requires_closed_run_and_valid_evidence(cloud, invalid):
+    run = {"ended_unix": 100, "provider_compute_upper_usd": 0.13, "provider_compute_source": "fixture"}
+    with pytest.raises(ValueError, match="Provider compute accounting|provider_compute_upper_usd"):
+        cloud.accounted_cost({**run, **invalid})
+
+
+@pytest.mark.parametrize("stage", ["qualification", "research"])
+def test_alternate_h100_profile_cannot_train_even_with_verified_billing(cloud, config, tmp_path, stage):
+    config.update(instance_type="gpu_1x_h100_sxm5", region="us-south-2", credits_verified=True)
+    cloud.validate_config(config)
+    client = FakeLambda(config)
+    with pytest.raises(ValueError, match="Alternate hardware is canary-only"):
+        cloud.run_session(client, config, {"runs": []}, tmp_path / "state.json", SimpleNamespace(stage=stage))
+    assert client.calls == []
+
+
+def test_regional_prepare_keeps_retained_filesystem_and_creates_named_mount(cloud, config, tmp_path):
+    class RegionalLambda(FakeLambda):
+        def request(self, method, endpoint, body=None):
+            if endpoint == "filesystems":
+                self.calls.append((method, endpoint, body))
+                return [{"id": "old-fs", "name": "scalar-pi"}] if method == "GET" else {"id": "new-fs"}
+            return super().request(method, endpoint, body)
+
+    config.update(instance_type="gpu_1x_h100_sxm5", region="us-south-2", filesystem_name="scalar-pi-us-south-2")
+    cloud.validate_config(config)
+    key = Path(config["ssh_key_path"])
+    key.write_text("fixture key")
+    key.with_suffix(".pub").write_text("ssh-ed25519 fixture")
+    retained = [{"id": "old-fs", "name": "scalar-pi", "region": "us-west-3"}]
+    state = {"runs": [], "resources": {"ssh_key_id": "key", "retained_filesystems": retained}}
+    client = RegionalLambda(config)
+    cloud.prepare(client, config, state, tmp_path / "state.json")
+    assert state["resources"]["retained_filesystems"] == retained
+    assert state["resources"]["filesystem_id"] == "new-fs"
+    assert ("POST", "filesystems", {"name": "scalar-pi-us-south-2", "region": "us-south-2"}) in client.calls
+    assert not any(endpoint == "instance-operations/launch" for _, endpoint, _ in client.calls)
+
+
 @pytest.mark.parametrize("stage", ["qualification", "research"])
 def test_canary_exception_does_not_authorize_training(cloud, canary_config, tmp_path, stage):
     client = FakeLambda(canary_config)
@@ -424,9 +503,12 @@ def test_unverified_prepare_checks_canary_budget_before_resource_creation(cloud,
     assert [method for method, _, _ in client.calls] == ["GET"]
 
 
+@pytest.mark.parametrize("profile", [("gpu_1x_h100_pcie", "us-west-3"), ("gpu_1x_h100_sxm5", "us-south-2")])
 def test_approved_canary_launches_and_terminates_without_claiming_verified_billing(
-    cloud, canary_config, tmp_path, monkeypatch
+    cloud, canary_config, tmp_path, monkeypatch, profile
 ):
+    canary_config.update(instance_type=profile[0], region=profile[1], canary_allowance_usd=5)
+    cloud.validate_config(canary_config)
     client = FakeLambda(canary_config)
     state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
     args = SimpleNamespace(
@@ -441,7 +523,9 @@ def test_approved_canary_launches_and_terminates_without_claiming_verified_billi
     with pytest.raises(OSError, match="fixture"):
         cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
     assert client.status == "terminated"
-    assert state["runs"][0]["allowance"]["canary_allowance_usd"] == 2
+    assert state["runs"][0]["allowance"]["canary_allowance_usd"] == 5
+    launch = next(body for _, endpoint, body in client.calls if endpoint == "instance-operations/launch")
+    assert (launch["instance_type_name"], launch["region_name"]) == profile
     assert canary_config["credits_verified"] is False
 
 

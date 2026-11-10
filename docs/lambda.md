@@ -49,8 +49,23 @@ An explicitly approved infrastructure-only exception can instead set private
 canary, and checks cumulative canary spending plus the reserve before admission.
 Qualification and research remain blocked until billing is verified. The current
 approved exception uses a $5 cumulative allowance and a $0.75 noncompute reserve.
-The increase from $2 authorizes one infrastructure retry after the initial
-mount-validation failure; it does not authorize qualification or research.
+The approved retries are bounded infrastructure probes within this cumulative
+cap; they do not authorize qualification or research.
+
+The infrastructure retry can also use `gpu_1x_h100_sxm5` in `us-south-2` with
+`filesystem_name=scalar-pi-us-south-2`. This profile is canary-only; qualification
+and research retain the H100 PCIe profile until the hardware protocol and measured
+budget are revised. Before creating a filesystem in another region, retain the
+old filesystem details in the private ledger's `resources.retained_filesystems`
+and clear only the active `filesystem_id`. `prepare` records the new filesystem
+ID without deleting retained resources. All mounts still use `/lambda/nfs/scalar-pi`.
+
+For a terminated run, a documented provider charge can replace its conservative
+elapsed-time estimate in budget accounting. Record a conservative upper bound in
+`provider_compute_upper_usd` and the evidence location in `provider_compute_source`.
+Missing provider charges remain estimates; an absent Usage row never means zero.
+The original timestamps and `estimated_compute_usd` remain unchanged, and open
+runs cannot use this override. Credits and noncompute reserves are unaffected.
 
 From the repository in PowerShell:
 

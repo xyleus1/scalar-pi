@@ -25,6 +25,8 @@ import uuid
 API = "https://cloud.lambda.com/api/v1/"
 REPOSITORY = "https://github.com/xyleus1/scalar-pi.git"
 REMOTE_ROOT = "/lambda/nfs/scalar-pi"
+RESEARCH_PROFILE = ("gpu_1x_h100_pcie", "us-west-3")
+CANARY_PROFILES = {RESEARCH_PROFILE, ("gpu_1x_h100_sxm5", "us-south-2")}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -121,8 +123,11 @@ def finite_positive(value, name, *, zero=False):
 
 
 def validate_config(config):
-    if config["instance_type"] != "gpu_1x_h100_pcie" or config["region"] != "us-west-3":
-        raise ValueError("This protocol pins H100 PCIe in us-west-3; revise the protocol before changing hardware")
+    if (config["instance_type"], config["region"]) not in CANARY_PROFILES:
+        raise ValueError("Use the research H100 PCIe profile or the canary-only H100 SXM profile")
+    filesystem_name = config.get("filesystem_name", "scalar-pi")
+    if not isinstance(filesystem_name, str) or re.fullmatch(r"scalar-pi(?:-[a-z0-9-]+)?", filesystem_name) is None:
+        raise ValueError("filesystem_name must identify a scalar-pi project filesystem")
     for key in ("budget_usd", "qualification_budget_usd", "max_hourly_rate_usd"):
         finite_positive(config[key], key)
     if config["budget_usd"] > 2000 or config["qualification_budget_usd"] > 100:
@@ -176,6 +181,18 @@ def session_cost(run, now=None):
     return minutes / 60 * run["hourly_rate_usd"]
 
 
+def accounted_cost(run):
+    """Use documented provider charges only after termination; retain elapsed estimates."""
+    if "provider_compute_upper_usd" not in run:
+        return session_cost(run)
+    if not run.get("ended_unix"):
+        raise ValueError("Provider compute accounting requires confirmed termination")
+    source = run.get("provider_compute_source")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("Provider compute accounting requires a nonempty evidence source")
+    return finite_positive(run["provider_compute_upper_usd"], "provider_compute_upper_usd", zero=True)
+
+
 def check_allowance(config, state, hours, rate, stage, budget_report=None):
     require_billing(config, stage)
     finite_positive(hours, "max_hours")
@@ -188,12 +205,12 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
         allowance, canary_reserve = canary_allowance(config)
         if hours > 0.25:
             raise ValueError("The approved canary is limited to 15 minutes")
-        canary_spent = sum(session_cost(run) for run in state["runs"] if run["stage"] == "canary")
+        canary_spent = sum(accounted_cost(run) for run in state["runs"] if run["stage"] == "canary")
         canary_forecast = canary_spent + config["noncompute_spent_usd"] + canary_reserve + 1.2 * hours * forecast_rate
         if canary_forecast > allowance:
             raise ValueError("Cumulative canary cost plus reserve exceeds the approved canary allowance")
         canary_cost = {"canary_allowance_usd": allowance, "canary_with_reserve_usd": canary_forecast}
-    spent = sum(session_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
+    spent = sum(accounted_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
     reserve = config["noncompute_reserve_usd"]
     if budget_report:
         reserve = max(
@@ -204,7 +221,7 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
     if forecast > config["budget_usd"]:
         raise ValueError("Session lifetime plus reserve exceeds the remaining project budget")
     if stage in {"canary", "qualification"}:
-        phase_spent = sum(session_cost(run) for run in state["runs"] if run["stage"] in {"canary", "qualification"})
+        phase_spent = sum(accounted_cost(run) for run in state["runs"] if run["stage"] in {"canary", "qualification"})
         if (
             phase_spent + config["noncompute_spent_usd"] + 1.2 * hours * forecast_rate
             > config["qualification_budget_usd"]
@@ -273,7 +290,7 @@ def prepare(client, config, state, state_path):
         # The exception covers only storage/key preparation and one bounded
         # infrastructure probe. It never changes the billing-verification flag.
         check_allowance(config, state, 0.25, rate, "canary")
-    spent = sum(session_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
+    spent = sum(accounted_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
     if spent + config["noncompute_reserve_usd"] >= config["budget_usd"]:
         raise ValueError("No remaining budget for persistent storage")
     cidr = ipaddress.ip_network(config["operator_cidr"], strict=True)
@@ -296,11 +313,12 @@ def prepare(client, config, state, state_path):
         ]
         save_state(state_path, state)
     if "filesystem_id" not in resources:
+        filesystem_name = config.get("filesystem_name", "scalar-pi")
         existing = client.request("GET", "filesystems")
-        if any(item["name"] == "scalar-pi" for item in existing):
-            raise ValueError("An unrecorded scalar-pi filesystem exists; reconcile it instead of adopting it")
+        if any(item["name"] == filesystem_name for item in existing):
+            raise ValueError("An unrecorded project filesystem exists; reconcile it instead of adopting it")
         resources["filesystem_id"] = client.request(
-            "POST", "filesystems", {"name": "scalar-pi", "region": config["region"]}
+            "POST", "filesystems", {"name": filesystem_name, "region": config["region"]}
         )["id"]
         save_state(state_path, state)
     print("Project SSH key and persistent filesystem recorded. No GPU launched.")
@@ -391,6 +409,8 @@ def remote_script(commit, script, *, with_submodules=True):
 
 
 def run_session(client, config, state, state_path, args):
+    if args.stage != "canary" and (config["instance_type"], config["region"]) != RESEARCH_PROFILE:
+        raise ValueError("Alternate hardware is canary-only; qualification and research require the original profile")
     require_billing(config, args.stage)
     if args.stage == "canary" and args.script.resolve() != Path(__file__).with_name("canary.sh").resolve():
         raise ValueError("Canary sessions must use the canonical scripts/lambda/canary.sh")
