@@ -559,7 +559,7 @@ def test_unverified_canary_has_cumulative_cost_and_reserve_limit(cloud, canary_c
 
 
 def test_approved_retry_preserves_spending_and_reserve(cloud, canary_config):
-    canary_config["canary_allowance_usd"] = 5
+    canary_config["canary_allowance_usd"] = 15
     state = {"runs": [{"started_unix": 0, "ended_unix": 17 * 60, "hourly_rate_usd": 3.29, "stage": "canary"}]}
     cloud.validate_config(canary_config)
     allowance = cloud.check_allowance(canary_config, state, 0.25, 3.29, "canary")
@@ -651,8 +651,11 @@ def test_canary_exception_rejects_arbitrary_worker_script(cloud, canary_config, 
     with pytest.raises(ValueError, match="canonical"):
         cloud.run_session(client, canary_config, {"runs": []}, tmp_path / "state.json", args)
     assert client.calls == []
-    canary_config["canary_allowance_usd"] = 5.01
-    with pytest.raises(ValueError, match=r"exceed \$5"):
+
+
+def test_canary_allowance_rejects_values_above_approved_cap(cloud, canary_config):
+    canary_config["canary_allowance_usd"] = 15.01
+    with pytest.raises(ValueError, match=r"exceed \$15"):
         cloud.validate_config(canary_config)
 
 
@@ -669,7 +672,7 @@ def test_unverified_prepare_checks_canary_budget_before_resource_creation(cloud,
 def test_approved_canary_launches_and_terminates_without_claiming_verified_billing(
     cloud, canary_config, tmp_path, monkeypatch, profile
 ):
-    canary_config.update(instance_type=profile[0], region=profile[1], canary_allowance_usd=5)
+    canary_config.update(instance_type=profile[0], region=profile[1], canary_allowance_usd=15)
     cloud.validate_config(canary_config)
     client = FakeLambda(canary_config)
     state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
@@ -685,7 +688,7 @@ def test_approved_canary_launches_and_terminates_without_claiming_verified_billi
     with pytest.raises(OSError, match="fixture"):
         cloud.run_session(client, canary_config, state, tmp_path / "state.json", args)
     assert client.status == "terminated"
-    assert state["runs"][0]["allowance"]["canary_allowance_usd"] == 5
+    assert state["runs"][0]["allowance"]["canary_allowance_usd"] == 15
     launch = next(body for _, endpoint, body in client.calls if endpoint == "instance-operations/launch")
     assert (launch["instance_type_name"], launch["region_name"]) == profile
     assert canary_config["credits_verified"] is False

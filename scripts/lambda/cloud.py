@@ -144,8 +144,8 @@ def validate_config(config):
 
 def canary_allowance(config):
     allowance = finite_positive(config.get("canary_allowance_usd", 0), "canary_allowance_usd")
-    if allowance > 5:
-        raise ValueError("The unverified-billing canary allowance cannot exceed $5")
+    if allowance > 15:
+        raise ValueError("The unverified-billing canary allowance cannot exceed $15")
     reserve = finite_positive(config.get("canary_noncompute_reserve_usd"), "canary_noncompute_reserve_usd", zero=True)
     return allowance, reserve
 
