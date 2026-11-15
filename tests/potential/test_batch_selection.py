@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -169,7 +170,13 @@ def test_preview_does_not_import_model_or_launch_process(tmp_path, monkeypatch, 
 
 def test_help_works_in_a_clean_python_process():
     script = Path(__file__).resolve().parents[2] / "scripts/select_potential_batch.py"
-    result = subprocess.run([sys.executable, "-S", str(script), "--help"], capture_output=True, check=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-S", str(script), "--help"],
+        capture_output=True,
+        check=True,
+        text=True,
+        env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
+    )
     assert "--execute" in result.stdout
 
 

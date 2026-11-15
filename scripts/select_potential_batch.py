@@ -16,9 +16,6 @@ import subprocess
 import sys
 import time
 
-from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
-from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
-
 CONFIG = "pi05_libero_potential"
 BATCHES = (1, 2, 4, 8, 16, 32, 64, 128, 256)
 
@@ -42,6 +39,8 @@ def input_hashes(args):
 
 def verify_report(args, *, repository=None):
     """Check existing fit evidence against current source/assets, without loading a model."""
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
     report = json.loads(args.verify_report.read_text())
     if (
         report.get("schema_version") != 1
@@ -125,6 +124,8 @@ def _qualified(args):
 def verify_profile(args):
     """Reuse one completed arm only while its measurements and inputs remain intact."""
     from openpi.research.qualification import verify_recovery
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+    from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 
     qualification = _qualified(args)
     profile = json.loads(args.verify_profile.read_text())
@@ -207,6 +208,8 @@ def verify_profile(args):
 
 
 def select(args):
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
     if args.output_root.exists() or args.output.exists():
         raise FileExistsError("Use a fresh selection output directory and report path")
     image_id = os.environ.get("SCALAR_PI_IMAGE_ID")
