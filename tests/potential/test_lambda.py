@@ -519,18 +519,24 @@ def test_os_lock_rejects_concurrent_controller(cloud, tmp_path):
         pass
 
 
-@pytest.mark.parametrize(("stage", "hours"), [("canary", 0.251), ("qualification", 2.01), ("research", 4.01)])
+@pytest.mark.parametrize(("stage", "hours"), [("canary", 0.251), ("qualification", 3.01), ("research", 4.01)])
 def test_supervised_sessions_have_stage_limits(cloud, config, stage, hours):
     with pytest.raises(ValueError, match="Supervised"):
         cloud.session_deadline(config, stage, hours, 1000)
 
 
-def test_session_cannot_straddle_announced_price_change(cloud, config):
+@pytest.mark.parametrize(("stage", "hours"), [("canary", 0.25), ("qualification", 2), ("qualification", 3), ("research", 4)])
+def test_supervised_session_deadline_uses_requested_duration(cloud, config, stage, hours):
+    assert cloud.session_deadline(config, stage, hours, 1000) == 1000 + hours * 3600
+
+
+@pytest.mark.parametrize(("stage", "hours"), [("qualification", 3), ("research", 4)])
+def test_session_cannot_straddle_announced_price_change(cloud, config, stage, hours):
     config["price_change_at_utc"] = "2026-11-16T00:00:00+00:00"
     change = cloud.dt.datetime.fromisoformat(config["price_change_at_utc"]).timestamp()
     with pytest.raises(ValueError, match="price change"):
-        cloud.session_deadline(config, "research", 4, change - 3600)
-    assert cloud.session_deadline(config, "research", 4, change) == change + 4 * 3600
+        cloud.session_deadline(config, stage, hours, change - 3600)
+    assert cloud.session_deadline(config, stage, hours, change) == change + hours * 3600
 
 
 def test_forecast_price_and_storage_are_reserved_without_double_counting(cloud, config):

@@ -183,7 +183,7 @@ def require_billing(config, stage):
 
 def session_deadline(config, stage, hours, started):
     finite_positive(hours, "max_hours")
-    maximum = {"canary": 0.25, "qualification": 2, "research": 4}[stage]
+    maximum = {"canary": 0.25, "qualification": 3, "research": 4}[stage]
     if hours > maximum:
         raise ValueError(f"Supervised {stage} sessions are limited to {maximum} hours")
     deadline = started + hours * 3600

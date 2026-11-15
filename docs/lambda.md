@@ -146,7 +146,9 @@ and virtiofs but rejects a result for an ancestor such as the guest root.
 This validates the mount configuration, not persistence across a new instance.
 
 Sessions are supervised: the canary is limited to 15 minutes, qualification to
-two hours, and research to four hours. Work completion ends the session early.
+three hours, and research to four hours. Work completion ends the session early.
+Each session keeps the absolute deadline set at launch; changing the controller's
+maximum does not extend an existing session.
 Choose a duration inside the remaining cumulative phase allowance. The controller counts
 boot, setup, idle time, and execution, rechecks price during the session, and
 keeps 20% compute headroom. It refuses concurrent controllers and another
