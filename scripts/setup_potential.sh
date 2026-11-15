@@ -22,5 +22,5 @@ uv sync --frozen --python 3.11.9
 uv run --no-sync python scripts/install_transformers_patch.py
 
 uv run --no-sync python scripts/potential_preflight.py --strict-stack
-uv run --no-sync pytest -q tests/potential
+uv run --no-sync python -m pytest -q tests/potential
 printf '%s\n' 'Environment and CPU mathematical checks completed. Full-model GPU, data, and rollout qualification remain required.'
