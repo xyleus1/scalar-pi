@@ -232,15 +232,21 @@ Launch these as separate bounded sessions using the same `run` command:
 `qualify.sh` exports original JAX and converted Torch outputs in separate
 processes with identical preprocessed observations, explicit noise, and flow
 time. It compares direct velocity and K=1/K=10 chunks for both checkpoints.
-FP32 tolerances are `atol=rtol=1e-4`; mixed-precision checks use `2e-2`. These are
-declared engineering tolerances. Investigate failures rather than relaxing
-them after observing success rates.
+The matched B0/B1/P protocol uses an FP32 frozen VLM and FP32 action expert,
+eager execution, and matmul precision `highest` in training and serving.
+Conversion and joint/cached parity require all 40 corpus observations at the
+unchanged `atol=rtol=1e-4` tolerances. Qualification also checks finite higher
+derivatives, frozen VLM bytes, immutable caches, reset-head learning, and the
+actual policy loader.
 
-Native joint execution cannot combine a BF16 VLM with an FP32 expert. Therefore
-joint/cached parity is checked in FP32, followed by a separate mixed-versus-FP32
-cached drift check. Qualification also checks finite higher derivatives, frozen
-VLM bytes, immutable caches, reset-head learning, and the actual policy loader.
-Training and research serving explicitly use matmul precision `highest`.
+The prior BF16 frozen-VLM optimization was rejected during full-size numerical
+qualification, before comparative training or evaluation outcomes. FP32
+conversion and all 40 FP32 cached/joint checks passed, but 3 of 40 BF16-versus-FP32
+drift checks failed at the declared `atol=rtol=2e-2` tolerance. Preserve those
+failed reports as historical evidence. The fallback changes the deployed
+precision for every matched arm; it does not relax the numerical tolerances.
+Qualification, checkpoint, resume and serving evidence must identify the same
+FP32 protocol; stale BF16 evidence is rejected.
 Qualification and simulator smoke runs receive unique attempt paths from the
 controller. Their earlier outputs are retained; qualification JSON reports are
 also copied to the directory downloaded back to Windows.
@@ -276,6 +282,15 @@ container, checkpoint, dataset manifest, and all three normalization assets.
 Each arm publishes its verified completed profile immediately to
 `data/experiments/reports/profiles/<config>.json`. A later session validates and
 reuses completed arms; interrupted arms retain their attempt evidence.
+
+After a precision change, rerun fit selection, recovery qualification, all
+three profiles, evaluation timing calibration and the measured budget decision.
+Do not reuse BF16 timing, memory or checkpoint-size estimates for FP32. Measure
+the additional frozen-weight storage and any throughput or fit changes; no
+fixed slowdown or memory multiplier is assumed. Retained FP32 base conversions
+and data assets may still be usable after explicit byte/provenance verification,
+but a changed source/container identity does not automatically inherit their
+old staging receipts.
 
 Use `configs/potential/measured_budget.example.json` as the measured-cost input.
 It intentionally contains nulls and `measured_gpu=false`, so it cannot authorize

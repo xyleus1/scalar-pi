@@ -11,6 +11,8 @@ import types
 
 import pytest
 
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
 
 def load_script():
     path = Path(__file__).resolve().parents[2] / "scripts/select_potential_batch.py"
@@ -61,6 +63,7 @@ def trainer_mock(module, args, monkeypatch, outcomes):
         path = args.output_root / module.CONFIG / name
         path.mkdir(parents=True)
         profile = {
+            **RESEARCH_PRECISION,
             "measured_gpu": True,
             "mode": "fit",
             "fit_probe_passed": True,
@@ -74,6 +77,7 @@ def trainer_mock(module, args, monkeypatch, outcomes):
         }
         (path / "profile.json").write_text(json.dumps(profile))
         manifest = {
+            "protocol": dict(RESEARCH_PRECISION),
             "container_image_id": "sha256:fixture",
             "code": {"commit": "a" * 40},
             "source_weights_sha256": module.digest(args.weights / "model.safetensors"),
@@ -169,7 +173,9 @@ def test_help_works_in_a_clean_python_process():
     assert "--execute" in result.stdout
 
 
-@pytest.mark.parametrize("change", [None, "weights", "manifest", "source", "commit", "dirty", "image", "norms"])
+@pytest.mark.parametrize(
+    "change", [None, "weights", "manifest", "source", "commit", "dirty", "image", "norms", "bf16", "missing_precision"]
+)
 def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, monkeypatch, change):
     module, args = load_script(), arguments(tmp_path)
     args.verify_report = args.output
@@ -181,6 +187,7 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
         path.parent.mkdir(parents=True)
         path.write_text("{}")
     report = {
+        **RESEARCH_PRECISION,
         "schema_version": 1,
         "kind": "batch_selection",
         "verified": True,
@@ -197,6 +204,10 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
             "source_snapshot_sha256": hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest(),
         },
     }
+    if change == "bf16":
+        report["vlm_precision"] = "bfloat16"
+    elif change == "missing_precision":
+        report.pop("precision_protocol")
     args.output.write_text(json.dumps(report))
     monkeypatch.setenv("SCALAR_PI_IMAGE_ID", "changed-image" if change == "image" else "fixture-image")
     changed_paths = {
@@ -218,15 +229,18 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
     if change is None:
         assert module.verify_report(args, repository=tmp_path) == report
     else:
-        with pytest.raises(ValueError, match="differ|same clean"):
+        with pytest.raises(ValueError, match="differ|same clean|precision|Invalid batch-selection"):
             module.verify_report(args, repository=tmp_path)
 
 
-@pytest.mark.parametrize("change", [None, "measurements", "manifest", "weights", "config", "recovery", "incomplete"])
+@pytest.mark.parametrize(
+    "change", [None, "measurements", "manifest", "weights", "config", "recovery", "incomplete", "bf16"]
+)
 def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, monkeypatch, change):
     module, args = load_script(), arguments(tmp_path)
     args.config = "pi05_libero_b0"
     identity = {
+        "precision_protocol": "potential_pi_fp32_v1",
         "base_checkpoint_sha256": module.digest(args.weights / "model.safetensors"),
         "base_conversion_sha256": module.digest(args.weights / "config.json"),
         "container_image_id": "sha256:fixture",
@@ -238,6 +252,7 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
     args.recovery_report.write_text(
         json.dumps(
             {
+                **RESEARCH_PRECISION,
                 "purpose": "full_size_cuda_recovery",
                 "passed": True,
                 "measured_gpu": True,
@@ -257,11 +272,26 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
     retained.mkdir()
     checkpoint = retained / "110"
     checkpoint.mkdir()
+    checkpoint_metadata = {
+        **RESEARCH_PRECISION,
+        "schema_version": 1,
+        "trainer": "potential_pi",
+        "velocity_mode": "direct",
+        "action_horizon": 10,
+        "action_dim": 32,
+    }
+    header = json.dumps(
+        {
+            "__metadata__": {key: str(value) for key, value in checkpoint_metadata.items()},
+            "weight": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]},
+        }
+    ).encode()
     for filename in ("model.safetensors", "raw_model.safetensors"):
-        (checkpoint / filename).write_bytes(b"published checkpoint")
+        (checkpoint / filename).write_bytes(len(header).to_bytes(8, "little") + header + bytes(4))
     (checkpoint / "potential_metadata.json").write_text(
         json.dumps(
             {
+                **checkpoint_metadata,
                 "run_mode": "profile",
                 "optimizer_updates": 110,
                 "model_sha256": module.digest(checkpoint / "model.safetensors"),
@@ -290,6 +320,7 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
                 "container_image_id": identity["container_image_id"],
                 "mode": "profile",
                 "protocol": {
+                    **RESEARCH_PRECISION,
                     "config": args.config,
                     "matmul_precision": "highest",
                     "deterministic": True,
@@ -301,6 +332,7 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
         )
     )
     profile = {
+        **RESEARCH_PRECISION,
         "mode": "profile",
         "measured_gpu": True,
         "valid_training_cost_profile": True,
@@ -323,6 +355,8 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
     args.verify_profile = tmp_path / "canonical-profile-copy.json"
     if change == "incomplete":
         profile["timed_optimizer_updates"] = 99
+    elif change == "bf16":
+        profile["vlm_precision"] = "bfloat16"
     args.verify_profile.write_text(json.dumps(profile))
     changed_paths = {
         "measurements": metrics,
@@ -337,5 +371,5 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
     if change is None:
         assert module.verify_profile(args) == profile
     else:
-        with pytest.raises(ValueError, match="differ|matching"):
+        with pytest.raises(ValueError, match="differ|matching|precision|safetensors header"):
             module.verify_profile(args)

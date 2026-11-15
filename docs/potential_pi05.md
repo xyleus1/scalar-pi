@@ -64,10 +64,12 @@ The sum is not an average: dividing by 320 would change velocity scale. There is
 | Keep native smooth GELU/SiLU and AdaRMS | Preserves pretrained computation while supporting higher derivatives. No new activation or normalization is introduced. |
 | Keep 32 model channels and horizon 10 | Official LIBERO configuration and checkpoint-compatible per-token projections. Only seven action dimensions are executed. |
 | Preserve native masks, positions, context and time | Prevents unrelated architectural changes from explaining the result. |
-| Frozen BF16 VLM, FP32 expert, eager kernels | Engineering reference for higher derivatives, not a published universal precision standard. Must be GPU-qualified. |
+| Frozen FP32 VLM, FP32 expert, eager kernels and `highest` matmul precision | Matched numerical protocol for B0/B1/P training and serving. Chosen after the full-size BF16 drift gate failed; full GPU qualification is still required. |
 | Architecture metadata in each research checkpoint | Required because direct and potential weight tensors have the same shapes. Loading the wrong interpretation can silently deploy the wrong policy. |
 
 The fixed graph uses the official LIBERO setting `discrete_state_input=False`. For pi0.5 this means numerical proprioception is not fed into the network; its learned conditioning is images and language. The state remains in observation plumbing. Adding state tokens is a separate experiment.
+
+The FP32 fallback was chosen during full-size numerical qualification, before comparative training or evaluation outcomes. The original FP32 JAX/Torch conversion checks passed for direct velocity and K=1/K=10 actions, with a largest absolute discrepancy of `1.71e-5`; all 40 FP32 cached/joint velocity checks also passed. The BF16 frozen-VLM path failed the declared `atol=rtol=2e-2` cross-precision drift check on 3 of 40 observations. That rejected diagnostic remains historical evidence. The deployed FP32 path retains the strict `atol=rtol=1e-4` conversion and cache checks; no tolerance was loosened.
 
 ## 2. Closest scalar architectures and literature review
 
@@ -125,6 +127,7 @@ Use the reference [pi05_libero training configuration](https://github.com/Physic
 - Global gradient norm clipping at 1.0.
 - 10,000-update linear warmup to `5e-5`, then constant `5e-5`.
 - EMA decay 0.999; predeclared terminal EMA checkpoint.
+- Frozen FP32 VLM and FP32 action expert in all three arms, with eager execution and `highest` matmul precision in training and serving.
 - Native tokenizer, image processing, action normalization, horizon 10 and replan horizon 5.
 - Three paired training seeds, with the exact seed values recorded in the run manifest.
 
@@ -252,7 +255,7 @@ uv run --no-sync python scripts/qualify_potential.py \
   --report data/gpu_qualification.json
 ```
 
-If gradient checkpointing will be used, repeat with `--gradient-checkpointing` and a new report filename. Use `--checkpoint-kind research` to check a trained potential checkpoint with mandatory architecture metadata and omit `--norm-stats` so the saved checkpoint assets are used. Derivative probes use synthetic inputs; separate actual-policy serving checks use the audited real-observation corpus and native transforms. The report retains `synthetic_input: true` and excludes training-cost and benchmark validity. The default two warmup and ten recorded calls per K are adjustable diagnostic counts, not literature-derived evaluation settings. Inspect its allocated/reserved memory series; it intentionally assigns no arbitrary memory-leak pass threshold. No full-size GPU qualification has been run on the current CPU-only machine.
+If gradient checkpointing will be used, repeat with `--gradient-checkpointing` and a new report filename. Use `--checkpoint-kind research` to check a trained potential checkpoint with mandatory architecture metadata and omit `--norm-stats` so the saved checkpoint assets are used. Derivative probes use synthetic inputs; separate actual-policy serving checks use the audited real-observation corpus and native transforms. The report retains `synthetic_input: true` and excludes training-cost and benchmark validity. The default two warmup and ten recorded calls per K are adjustable diagnostic counts, not literature-derived evaluation settings. Inspect its allocated/reserved memory series; it intentionally assigns no arbitrary memory-leak pass threshold. These checks must pass on the target GPU before training; the local CPU test environment cannot establish them.
 
 Profile each group in a separate experiment directory. The following performs actual complete optimizer updates; it is not an inference-only timing loop:
 
@@ -267,6 +270,8 @@ uv run --no-sync python scripts/train_potential.py pi05_libero_potential \
 Repeat for B0 and B1. Inspect peak allocated/reserved memory, complete update time, finite loss and gradients, frozen-weight checks and output metadata. Choose the common microbatch based on the potential model's measured fit, then use that same microbatch, accumulation, effective batch and numerical settings for all groups.
 
 Each profile also writes one final diagnostic checkpoint and records its I/O duration separately. Profiling checkpoints cannot initialize or resume a research training run. The Lambda selector first tests common microbatch fit; its two-update candidates are diagnostics and cannot replace the 100-update cost profiles.
+
+The precision change requires fresh fit selection, exact recovery qualification, per-arm update/checkpoint profiles, evaluation timing calibration, and a measured budget decision. FP32 increases storage for formerly BF16 frozen weights and can change memory use, fit and throughput; no fixed cost multiplier is assumed. Existing FP32 base conversions and data assets do not change merely because the research precision changes, but reuse must verify their bytes and provenance. Reports and checkpoints from the rejected BF16 protocol cannot authorize FP32 training, resume or research serving.
 
 Reference training example:
 
@@ -361,9 +366,9 @@ uv run --no-sync pytest -q tests/potential
 
 The mathematical tests cover the full Jacobian term, FP64 gradient/double-gradient checks, zero-head learnability, an analytic Gaussian mixture, the reverse-time sign, the one-step conditional-mean limit, batch independence, Hessian symmetry, contraction precision and inference graph detachment. They use standard PyTorch and pytest without JAX/model downloads.
 
-Seven CPU integration tests using small dimensions of the actual pi0.5 implementation have also passed: action-expert double backward and frozen VLM parameters; BF16 frozen VLM with FP32 expert double backward; immutable conditioning cache; checkpointed versus ordinary suffix output/gradient parity; local inference gradient handling; joint versus cached vector-path parity; and matched zero-head controls that begin learning. These validate the code paths at small scale. They do not establish full-size GPU fit, kernel behavior, training convergence or simulator success.
+The CPU integration suite uses small dimensions of the actual pi0.5 implementation to check action-expert double backward, frozen VLM parameters, immutable conditioning caches, checkpointed versus ordinary suffix output/gradient parity, local inference gradient handling, joint versus cached vector-path parity, and matched zero-head controls that begin learning. Earlier BF16 coverage was a small-scale implementation check and did not establish full-size numerical suitability. The matched FP32 path requires actual parameter-dtype checks and rejection of stale precision metadata as well as the full-size GPU gates. CPU tests do not establish GPU fit, training convergence or simulator success.
 
-Local validation on 2026-11-06: **121 tests passed**, Ruff checks passed, and `git diff --check` passed. The CPU test environment used WSL Linux, Python 3.11.18, Torch 2.7.1+cpu, Transformers 4.53.2 with the exact OpenPI replacements, and NumPy 1.26.4. The official configuration/data-loader import and collation smoke checks and trainer/server CLI checks also passed. This CPU environment is separate from the locked GPU/container recipe. The local JUnit report is `research_outputs/cpu_tests.xml`; the prerequisite audit is `research_outputs/local_preflight.json`. The audit correctly reports CUDA unavailable and full-model readiness false. Docker build, full pretrained checkpoint conversion, full-size CUDA qualification, training, and real LIBERO rollouts remain unexecuted.
+Local validation on 2026-11-06: **121 tests passed**, Ruff checks passed, and `git diff --check` passed. The CPU test environment used WSL Linux, Python 3.11.18, Torch 2.7.1+cpu, Transformers 4.53.2 with the exact OpenPI replacements, and NumPy 1.26.4. The official configuration/data-loader import and collation smoke checks and trainer/server CLI checks also passed. This CPU environment is separate from the locked GPU/container recipe. The local JUnit report is `research_outputs/cpu_tests.xml`; the prerequisite audit is `research_outputs/local_preflight.json`. That local audit reported CUDA unavailable and full-model readiness false. At that validation date, Docker build, full pretrained checkpoint conversion, full-size CUDA qualification, training, and real LIBERO rollouts had not been executed.
 
 Before claiming real-model readiness, additionally verify:
 

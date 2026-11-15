@@ -11,6 +11,7 @@ import types
 import pytest
 
 from openpi.research import evaluation as ev
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 
 def _manifest():
@@ -41,6 +42,7 @@ def _research_metadata(cell):
         return None
     return {
         "trainer": "potential_pi",
+        **RESEARCH_PRECISION,
         "training_seed": cell["training_seed"],
         "optimizer_updates": 30000,
         "inference_weights": "ema",
@@ -55,7 +57,7 @@ def _research_metadata(cell):
         "container_image_id": "sha256:fixture-model",
         "model_sha256": ev.content_digest(cell["checkpoint_id"]),
         "normalization_hash": "a" * 64,
-        "resume_signature": {"microbatch_size": 4, "effective_batch_size": 256},
+        "resume_signature": {**RESEARCH_PRECISION, "microbatch_size": 4, "effective_batch_size": 256},
     }
 
 
@@ -89,6 +91,7 @@ def _records(manifest):
                             ev.paired_noise_seed(7, f"{cell['suite']}/{task}", state, q) for q in range(2)
                         ],
                         "server_metadata": {
+                            **RESEARCH_PRECISION,
                             "checkpoint_id": cell["checkpoint_id"],
                             "config_name": cell["config"],
                             "num_steps": cell["num_steps"],
@@ -809,6 +812,25 @@ def test_provenance_binds_episode_server_metadata(field):
     rows = _records(manifest)
     rows[0]["server_metadata"][field] = "changed"
     with pytest.raises(ValueError, match="differs from its provenance"):
+        ev.validate_results(rows, manifest)
+
+
+@pytest.mark.parametrize("location", ["serving", "checkpoint", "resume"])
+def test_evaluation_rejects_bf16_even_with_internally_consistent_provenance(location):
+    manifest = _manifest()
+    manifest["require_provenance"] = True
+    rows = _records(manifest)
+    changed = rows[0]
+    metadata = changed["server_metadata"]
+    target = {
+        "serving": metadata,
+        "checkpoint": metadata["research"],
+        "resume": metadata["research"]["resume_signature"],
+    }[location]
+    target["vlm_precision"] = "bfloat16"
+    changed["_provenance"]["server_metadata"] = copy.deepcopy(metadata)
+    changed["provenance_sha256"] = ev.content_digest(changed["_provenance"])
+    with pytest.raises(ValueError, match="precision"):
         ev.validate_results(rows, manifest)
 
 

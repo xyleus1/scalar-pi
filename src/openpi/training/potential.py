@@ -21,6 +21,7 @@ from torch.optim.swa_utils import AveragedModel
 from torch.optim.swa_utils import get_ema_multi_avg_fn
 
 from openpi.shared.potential_checkpoint import METADATA_FILENAME
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.shared.potential_checkpoint import SCHEMA_VERSION
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 
@@ -265,6 +266,7 @@ def save_checkpoint(
             "trainer": "potential_pi",
             "schema_version": str(SCHEMA_VERSION),
             **{key: str(metadata[key]) for key in ("velocity_mode", "action_horizon", "action_dim")},
+            **{key: str(metadata[key]) for key in RESEARCH_PRECISION},
         }
         safetensors.torch.save_model(
             model, staging / "raw_model.safetensors", metadata={**embedded, "weight_kind": "raw"}

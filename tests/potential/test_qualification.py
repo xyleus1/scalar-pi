@@ -13,16 +13,17 @@ import safetensors.torch
 import torch
 
 from openpi.research import qualification
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from scripts import qualify_potential
 from scripts import qualify_potential_recovery as recovery
 
 
 def passing_receipt():
     return {
-        "identity": {"base_checkpoint_sha256": "a" * 64},
+        "identity": {"base_checkpoint_sha256": "a" * 64, "precision_protocol": "potential_pi_fp32_v1"},
         "correctness_checks_passed": True,
         "measured_gpu": True,
-        "precision": {"matmul": "highest"},
+        "precision": dict(RESEARCH_PRECISION),
         "math_only": False,
         "actual_policy_serving": {"passed": True},
         "conversion_parity": {"passed": True},
@@ -38,7 +39,7 @@ def test_full_qualification_rejects_stale_or_incomplete_receipts(tmp_path, monke
     elif change in ("failed", "cpu"):
         report["correctness_checks_passed" if change == "failed" else "measured_gpu"] = False
     elif change == "precision":
-        report["precision"]["matmul"] = "high"
+        report["precision"]["matmul_precision"] = "high"
     elif change == "math_only":
         report["math_only"] = True
     elif change in ("serving", "parity"):
@@ -50,6 +51,21 @@ def test_full_qualification_rejects_stale_or_incomplete_receipts(tmp_path, monke
     else:
         with pytest.raises(ValueError, match="qualification|Qualification"):
             qualification.verify_qualification(path)
+
+
+@pytest.mark.parametrize("field", ["precision_protocol", "vlm_precision", "expert_precision"])
+@pytest.mark.parametrize("missing", [False, True])
+def test_qualification_rejects_stale_or_missing_runtime_precision(tmp_path, monkeypatch, field, missing):
+    report = passing_receipt()
+    monkeypatch.setattr(qualification, "execution_identity", lambda **kwargs: passing_receipt()["identity"])
+    if missing:
+        del report["precision"][field]
+    else:
+        report["precision"][field] = "bfloat16"
+    path = tmp_path / "qualification.json"
+    path.write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="precision"):
+        qualification.verify_qualification(path)
 
 
 def test_math_gate_can_be_reused_only_as_math_gate(tmp_path, monkeypatch):
@@ -89,6 +105,7 @@ def test_recovery_receipt_binds_batch_norm_and_actual_state_checks(tmp_path):
         "normalization_hash": "b" * 64,
     }
     report = {
+        **RESEARCH_PRECISION,
         "purpose": "full_size_cuda_recovery",
         "passed": True,
         "measured_gpu": True,
@@ -229,7 +246,15 @@ def test_recovery_requires_all_three_updates_then_actual_serving(tmp_path, monke
         commands.append(command)
         if "--serving-only" in command:
             path = Path(command[command.index("--report") + 1])
-            path.write_text(json.dumps({"correctness_checks_passed": True, "actual_policy_serving": {"passed": True}}))
+            path.write_text(
+                json.dumps(
+                    {
+                        "correctness_checks_passed": True,
+                        "precision": dict(RESEARCH_PRECISION),
+                        "actual_policy_serving": {"passed": True},
+                    }
+                )
+            )
             return
         name = command[command.index("--exp-name") + 1]
         updates = int(command[command.index("--updates") + 1])

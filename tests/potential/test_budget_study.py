@@ -10,6 +10,7 @@ from test_evaluation import _records
 from test_evaluation import _write_rows
 
 from openpi.research import evaluation
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 ROOT = Path(__file__).resolve().parents[2]
 choose_study = runpy.run_path(str(ROOT / "scripts/potential_preflight.py"))["choose_study"]
@@ -18,6 +19,7 @@ choose_study = runpy.run_path(str(ROOT / "scripts/potential_preflight.py"))["cho
 def _profile():
     suites = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
     return {
+        **RESEARCH_PRECISION,
         "measured_gpu": True,
         "model_kind": "pi05_full",
         "hardware": "CPU TEST FIXTURE ONLY",
@@ -53,6 +55,7 @@ def _checkpoint(tmp_path, group="B0", seed=42, updates=5000):
     directory = tmp_path / f"{group}-{seed}-{updates}"
     directory.mkdir()
     metadata = {
+        **RESEARCH_PRECISION,
         "schema_version": 1,
         "trainer": "potential_pi",
         "run_mode": "training",
@@ -190,6 +193,16 @@ def test_requires_actual_checkpoint_and_rejects_duplicate_runs(tmp_path):
     profile["completed_training"] = [{key: value for key, value in record.items() if key != "checkpoint_dir"}]
     with pytest.raises(ValueError, match="checkpoint_dir"):
         choose_study(profile, 4, 2000)
+
+
+def test_bf16_checkpoint_cannot_receive_fp32_completed_work_credit(tmp_path):
+    record = _checkpoint(tmp_path)
+    path = Path(record["checkpoint_dir"]) / "potential_metadata.json"
+    metadata = json.loads(path.read_text())
+    metadata["vlm_precision"] = "bfloat16"
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="disagrees with its research checkpoint"):
+        choose_study({**_profile(), "completed_training": [record]}, 4, 2000)
 
 
 @pytest.mark.parametrize("corruption", ["profile", "update_count", "changed_weight", "missing_state", "zero_state"])

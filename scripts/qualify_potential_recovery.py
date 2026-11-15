@@ -136,6 +136,8 @@ def verify_inputs(args):
 def verify_report(args):
     from openpi.research.evaluation import file_digest
     from openpi.research.qualification import verify_recovery
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+    from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 
     qualification, selection = verify_inputs(args)
     report = verify_recovery(
@@ -156,6 +158,13 @@ def verify_report(args):
     serving = report["actual_policy_serving"]
     if file_digest(serving["report"]) != serving["sha256"]:
         raise ValueError("Recovery serving evidence changed")
+    if json.loads(Path(serving["report"]).read_text()).get("precision") != RESEARCH_PRECISION:
+        raise ValueError("Recovery serving precision differs from the current protocol")
+    checkpoint_metadata = validate_checkpoint_metadata(
+        Path(report["checkpoint"]), velocity_mode="potential_dot", action_horizon=10, action_dim=32
+    )
+    if checkpoint_metadata is None or checkpoint_metadata.get("trainer") != "potential_pi":
+        raise ValueError("Recovery checkpoint requires current research metadata")
     if file_digest(Path(report["checkpoint"]) / "model.safetensors") != report["checkpoint_sha256"]:
         raise ValueError("Recovery published checkpoint changed")
     return report
@@ -164,6 +173,7 @@ def verify_report(args):
 def qualify(args):
     from openpi.research.evaluation import file_digest
     from openpi.research.qualification import verify_qualification
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
     if args.output_root.exists() or args.report.exists():
         raise FileExistsError("Recovery evidence requires fresh output/report paths")
@@ -174,6 +184,7 @@ def qualify(args):
         "passed": False,
         "measured_gpu": True,
         "identity": qualification["identity"],
+        **RESEARCH_PRECISION,
         "microbatch_size": selection["microbatch_size"],
         "gradient_checkpointing": selection["gradient_checkpointing"],
         "data_manifest_sha256": file_digest(args.data_manifest),
@@ -236,7 +247,11 @@ def qualify(args):
             args.deadline_unix,
         )
         serving = json.loads(serving_report.read_text())
-        if not serving.get("correctness_checks_passed") or not serving.get("actual_policy_serving", {}).get("passed"):
+        if (
+            not serving.get("correctness_checks_passed")
+            or not serving.get("actual_policy_serving", {}).get("passed")
+            or serving.get("precision") != RESEARCH_PRECISION
+        ):
             raise ValueError("Selected-batch P checkpoint did not pass actual serving")
         report["actual_policy_serving"] = {
             "passed": True,

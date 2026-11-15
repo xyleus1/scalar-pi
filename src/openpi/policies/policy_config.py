@@ -12,6 +12,7 @@ import openpi.models.model as _model
 import openpi.policies.policy as _policy
 from openpi.shared import normalize
 import openpi.shared.download as download
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
@@ -133,11 +134,13 @@ def create_trained_policy(
     if is_pytorch:
         model = train_config.model.load_pytorch(train_config, weight_path)
         if getattr(train_config.model, "freeze_vlm", False):
-            model.configure_expert_only()
-            # The constructor sets "high". Research serving must match the
-            # "highest" arithmetic qualified and used by the matched trainer.
             import torch
 
+            model.configure_expert_only(vlm_dtype=torch.float32)
+            if any(parameter.dtype != torch.float32 for parameter in model.parameters()):
+                raise ValueError("Research serving requires FP32 VLM and expert parameters")
+            # The constructor sets "high". Research serving must match the
+            # "highest" arithmetic qualified and used by the matched trainer.
             torch.set_float32_matmul_precision("highest")
         else:
             model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
@@ -185,6 +188,7 @@ def create_trained_policy(
         sample_kwargs=sample_kwargs,
         metadata={
             **(train_config.policy_metadata or {}),
+            **(RESEARCH_PRECISION if is_pytorch and getattr(train_config.model, "freeze_vlm", False) else {}),
             "config_name": train_config.name,
             "checkpoint_id": str(checkpoint_dir),
             "checkpoint_sha256": checkpoint_sha256,

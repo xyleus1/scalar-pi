@@ -158,8 +158,12 @@ class PI0Pytorch(nn.Module):
             }
         )
 
-    def configure_expert_only(self, vlm_dtype: torch.dtype = torch.bfloat16) -> None:
-        """Call AFTER loading FP32 weights, so casting cannot round the expert weights."""
+    def configure_expert_only(self, vlm_dtype: torch.dtype = torch.float32) -> None:
+        """Configure the FP32 study; explicit BF16 remains available for diagnostics.
+
+        Call after loading original FP32 weights. Casting BF16 back to FP32
+        cannot recover the original values and is not a precision migration.
+        """
         if not self.freeze_vlm:
             raise ValueError("configure_expert_only requires model.freeze_vlm=True.")
         if vlm_dtype not in (torch.float32, torch.bfloat16):

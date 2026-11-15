@@ -10,6 +10,7 @@ import safetensors.torch
 import torch
 
 from openpi.shared.potential_checkpoint import METADATA_FILENAME
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training.potential import ResumableBatchSampler
 from openpi.training.potential import capture_rng_state
@@ -123,7 +124,7 @@ def test_missing_sidecar_cannot_downgrade_marked_potential(tmp_path):
 
 def test_embedded_metadata_prevents_sidecar_removal_and_mode_tampering(tmp_path):
     expected = {"velocity_mode": "potential_dot", "action_horizon": 10, "action_dim": 32}
-    metadata = {"schema_version": 1, "trainer": "potential_pi", **expected}
+    metadata = {"schema_version": 1, "trainer": "potential_pi", **RESEARCH_PRECISION, **expected}
     safetensors.torch.save_file(
         {"weight": torch.ones(1)},
         tmp_path / "model.safetensors",
@@ -146,8 +147,41 @@ def test_embedded_metadata_prevents_sidecar_removal_and_mode_tampering(tmp_path)
 def test_research_sidecar_requires_embedded_architecture_metadata(tmp_path):
     expected = {"velocity_mode": "direct", "action_horizon": 10, "action_dim": 32}
     safetensors.torch.save_file({"weight": torch.ones(1)}, tmp_path / "model.safetensors")
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps({"schema_version": 1, "trainer": "potential_pi", **expected}))
+    (tmp_path / METADATA_FILENAME).write_text(
+        json.dumps({"schema_version": 1, "trainer": "potential_pi", **RESEARCH_PRECISION, **expected})
+    )
     with pytest.raises(ValueError, match="missing embedded"):
+        validate_checkpoint_metadata(tmp_path, **expected)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["bf16_metadata", "missing_protocol", "bf16_header", "rounded_tensor", "rounded_raw", "missing_raw_protocol"],
+)
+def test_research_checkpoint_precision_cannot_be_relabelled(tmp_path, change):
+    expected = {"velocity_mode": "direct", "action_horizon": 10, "action_dim": 32}
+    metadata = {"schema_version": 1, "trainer": "potential_pi", **expected, **RESEARCH_PRECISION}
+    embedded = {key: str(value) for key, value in metadata.items()}
+    weights = torch.tensor([0.1234567], dtype=torch.float32)
+    if change == "bf16_metadata":
+        metadata["vlm_precision"] = "bfloat16"
+    elif change == "missing_protocol":
+        del metadata["precision_protocol"]
+    elif change == "bf16_header":
+        embedded["vlm_precision"] = "bfloat16"
+    elif change == "rounded_tensor":
+        weights = weights.bfloat16()
+    safetensors.torch.save_file({"backbone.weight": weights}, tmp_path / "model.safetensors", metadata=embedded)
+    if change in ("rounded_raw", "missing_raw_protocol"):
+        raw_header = embedded.copy()
+        if change == "missing_raw_protocol":
+            del raw_header["precision_protocol"]
+        raw_weights = weights.bfloat16() if change == "rounded_raw" else weights
+        raw_path = tmp_path / "raw_model.safetensors"
+        safetensors.torch.save_file({"backbone.weight": raw_weights}, raw_path, metadata=raw_header)
+        metadata["raw_model_sha256"] = sha256_file(raw_path)
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="precision|FP32|float32"):
         validate_checkpoint_metadata(tmp_path, **expected)
 
 
@@ -186,7 +220,7 @@ def test_checkpoint_ema_export_and_exact_next_step_resume(tmp_path, monkeypatch,
         optimizer=optimizer,
         ema=ema,
         state={"optimizer_updates": 1, "consumed_microbatches": 4},
-        metadata=metadata,
+        metadata={**RESEARCH_PRECISION, **metadata},
         assets={"assets/test/norm_stats.json": "{}"},
     )
     # Saving EMA must not alter the live raw training weights.
@@ -230,7 +264,7 @@ def test_checkpoint_ema_export_and_exact_next_step_resume(tmp_path, monkeypatch,
             optimizer=optimizer,
             ema=ema,
             state={"optimizer_updates": 1},
-            metadata=metadata,
+            metadata={**RESEARCH_PRECISION, **metadata},
         )
 
 
@@ -254,7 +288,7 @@ def test_checkpoint_failure_is_not_published_and_restores_weights(tmp_path, monk
             optimizer=optimizer,
             ema=ema,
             state={"optimizer_updates": 1},
-            metadata={"velocity_mode": "direct", "action_horizon": 10, "action_dim": 32},
+            metadata={**RESEARCH_PRECISION, "velocity_mode": "direct", "action_horizon": 10, "action_dim": 32},
         )
     assert not (tmp_path / "1").exists()
     assert not list(tmp_path.iterdir())
@@ -365,10 +399,12 @@ def test_offline_dataset_fails_before_loader_and_checks_configured_root(tmp_path
 
 
 @pytest.mark.parametrize(
-    "key", ["optimizer", "code_commit", "source_snapshot_sha256", "container_image_id", "packages"]
+    "key",
+    ["optimizer", "code_commit", "source_snapshot_sha256", "container_image_id", "packages", *RESEARCH_PRECISION],
 )
 def test_resume_rejects_changed_source_container_dependencies_or_optimizer(key):
     current = {
+        **RESEARCH_PRECISION,
         "optimizer": {"b1": 0.9, "b2": 0.95},
         "code_commit": "a" * 40,
         "source_snapshot_sha256": "b" * 64,

@@ -7,6 +7,7 @@ import safetensors.torch
 import torch
 
 from openpi.models.pi0_config import Pi0Config
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.training.config import get_config
 
 
@@ -52,6 +53,7 @@ def test_potential_configuration_rejects_unsafe_execution_modes():
 )
 def test_loader_rejects_wrong_research_control_before_allocating_model(tmp_path, config_name, message):
     metadata = {
+        **RESEARCH_PRECISION,
         "schema_version": 1,
         "trainer": "potential_pi",
         "velocity_mode": "direct",
@@ -65,3 +67,36 @@ def test_loader_rejects_wrong_research_control_before_allocating_model(tmp_path,
     config = get_config(config_name)
     with pytest.raises(ValueError, match=message):
         config.model.load_pytorch(config, str(path))
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_serving_rejects_old_research_precision_before_model_allocation(tmp_path, monkeypatch, missing):
+    from openpi.policies import policy_config
+
+    metadata = {
+        **RESEARCH_PRECISION,
+        "schema_version": 1,
+        "trainer": "potential_pi",
+        "velocity_mode": "potential_dot",
+        "action_horizon": 10,
+        "action_dim": 32,
+    }
+    if missing:
+        del metadata["precision_protocol"]
+    else:
+        metadata["vlm_precision"] = "bfloat16"
+    safetensors.torch.save_file(
+        {"fixture": torch.ones(1)},
+        tmp_path / "model.safetensors",
+        metadata={key: str(value) for key, value in metadata.items()},
+    )
+    (tmp_path / "potential_metadata.json").write_text(json.dumps(metadata))
+    tokenizer = tmp_path / "big_vision/paligemma_tokenizer.model"
+    tokenizer.parent.mkdir()
+    tokenizer.write_bytes(b"not used before precision rejection")
+    monkeypatch.setenv("OPENPI_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(policy_config.download, "maybe_download", lambda path: tmp_path)
+    config = get_config("pi05_libero_potential")
+    monkeypatch.setattr(type(config.model), "load_pytorch", lambda *args: pytest.fail("Allocated an unqualified model"))
+    with pytest.raises(ValueError, match="precision"):
+        policy_config.create_trained_policy(config, tmp_path, pytorch_device="cpu")

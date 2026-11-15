@@ -119,6 +119,8 @@ def estimate_budget(profile: dict, hourly_rate_usd: float, budget_usd: float) ->
 
 def _study_progress(profile: dict) -> tuple[dict, dict, list]:
     """Only subtract work backed by complete checkpoint or validated suite artifacts."""
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
     identity = profile.get("experiment_identity", {})
     if not isinstance(identity, dict) or set(identity) - {"code_commit", "container_image_id"}:
         raise ValueError("experiment_identity supports code_commit and container_image_id")
@@ -150,6 +152,7 @@ def _study_progress(profile: dict) -> tuple[dict, dict, list]:
         metadata = read_json(directory / "potential_metadata.json")
         expected = {
             "schema_version": 1,
+            **RESEARCH_PRECISION,
             "trainer": "potential_pi",
             "run_mode": "training",
             "training_seed": seed,

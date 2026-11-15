@@ -24,6 +24,7 @@ def digest(path):
 
 def verify_terminal(checkpoint, config, seed, selection):
     """Compare a terminal artifact with an already verified batch-selection report."""
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
     from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 
     if config not in CONFIGS or type(seed) is not int or seed not in (17, 42, 93):
@@ -42,9 +43,7 @@ def verify_terminal(checkpoint, config, seed, selection):
         "inference_weights": "ema",
         "initialization": initialization,
         "freeze_vlm": True,
-        "expert_precision": "float32",
-        "vlm_precision": "bfloat16",
-        "matmul_precision": "highest",
+        **RESEARCH_PRECISION,
         "code_commit": selection["code"]["commit"],
         "source_snapshot_sha256": selection["code"]["source_snapshot_sha256"],
         "container_image_id": selection["container_image_id"],
@@ -58,6 +57,7 @@ def verify_terminal(checkpoint, config, seed, selection):
             raise ValueError(f"Terminal checkpoint differs from the selected experiment: {field}")
     signature = metadata.get("resume_signature", {})
     expected_signature = {
+        **RESEARCH_PRECISION,
         "config": config,
         "seed": seed,
         "microbatch_size": selection["microbatch_size"],

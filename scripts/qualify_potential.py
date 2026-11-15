@@ -100,6 +100,7 @@ def _qualify(args, report):
     from openpi.research.evaluation import file_digest
     from openpi.research.policy_checks import require_staged_tokenizer
     from openpi.research.qualification import execution_identity
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
     from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
     from openpi.training import config as configs
     from openpi.training.potential import validate_base_conversion
@@ -136,6 +137,8 @@ def _qualify(args, report):
         if (
             parity.get("passed") is not True
             or parity.get("purpose") != "direct_model_conversion_and_cache_parity"
+            or any(parity.get(key) != value for key, value in RESEARCH_PRECISION.items())
+            or parity.get("corpus_observations") != 40
             or parity.get("torch", {}).get("checkpoint_sha256") != report["identity"]["base_checkpoint_sha256"]
             or parity.get("torch", {}).get("corpus_sha256") != file_digest(args.corpus)
             or parity.get("torch", {}).get("normalization_sha256") != file_digest(args.norm_stats)
@@ -156,7 +159,7 @@ def _qualify(args, report):
     torch.backends.cudnn.benchmark = False
     model = PI0Pytorch(config.model)
     safetensors.torch.load_model(model, weight_file, strict=True)
-    model.configure_expert_only(vlm_dtype=torch.bfloat16)
+    model.configure_expert_only(vlm_dtype=torch.float32)
     model.to(device)
     torch.set_float32_matmul_precision("highest")
     if args.gradient_checkpointing:
@@ -190,11 +193,7 @@ def _qualify(args, report):
             "image_layout": "NCHW",
             "image_shape": [args.batch_size, 3, 224, 224],
             "token_shape": list(token_shape),
-            "precision": {
-                "expert": "float32",
-                "frozen_vlm": "bfloat16_with_native_fp32_exceptions",
-                "matmul": "highest",
-            },
+            "precision": dict(RESEARCH_PRECISION),
             "checks": {},
         }
     )
@@ -354,6 +353,7 @@ def _qualify_policy(args, report):
     from openpi.research.policy_checks import file_digest
     from openpi.research.policy_checks import load_corpus
     from openpi.shared import normalize
+    from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
     from openpi.training.config import get_config
 
     gc.collect()
@@ -370,7 +370,11 @@ def _qualify_policy(args, report):
             sample_kwargs={"num_steps": steps},
             pytorch_device="cuda:0",
         )
-        if policy.metadata["matmul_precision"] != "highest" or torch.get_float32_matmul_precision() != "highest":
+        if (
+            any(policy.metadata.get(key) != value for key, value in RESEARCH_PRECISION.items())
+            or torch.get_float32_matmul_precision() != "highest"
+            or any(parameter.dtype != torch.float32 for parameter in policy._model.parameters())  # noqa: SLF001
+        ):
             raise RuntimeError("Actual serving loader disagrees with qualified arithmetic")
         first = None
         for index in range(len(corpus["states"])):
@@ -395,6 +399,7 @@ def _qualify_policy(args, report):
     }
     report["corpus_sha256"] = file_digest(args.corpus)
     report["normalization_sha256"] = serving["1"]["policy"]["normalization_sha256"]
+    report["precision"] = dict(RESEARCH_PRECISION)
 
 
 def main(argv=None):

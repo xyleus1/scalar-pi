@@ -9,6 +9,7 @@ import time
 
 from openpi.research.evaluation import file_digest
 from openpi.research.evaluation import source_identity
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 
 def execution_identity(*, checkpoint=None, base_hash=None, conversion_hash=None, repository=None):
@@ -31,6 +32,7 @@ def execution_identity(*, checkpoint=None, base_hash=None, conversion_hash=None,
         "code_commit": source["commit"],
         "source_sha256": source["source_sha256"],
         "container_image_id": image,
+        "precision_protocol": RESEARCH_PRECISION["precision_protocol"],
     }
 
 
@@ -41,8 +43,8 @@ def verify_qualification(path, *, checkpoint=None, base_hash=None, conversion_ha
         raise ValueError("Numerical qualification differs from current base/source/container")
     if report.get("correctness_checks_passed") is not True or report.get("measured_gpu") is not True:
         raise ValueError("A passing full-size CUDA qualification is required")
-    if report.get("precision", {}).get("matmul") != "highest":
-        raise ValueError("Qualification must use highest matmul precision")
+    if report.get("precision") != RESEARCH_PRECISION:
+        raise ValueError("Qualification requires the current FP32 research precision protocol")
     if require_serving and (
         report.get("math_only") is not False
         or report.get("actual_policy_serving", {}).get("passed") is not True
@@ -55,6 +57,7 @@ def verify_qualification(path, *, checkpoint=None, base_hash=None, conversion_ha
 def verify_recovery(path, *, identity, microbatch_size, gradient_checkpointing, data_manifest, normalization_hash):
     report = json.loads(Path(path).read_text(encoding="utf-8"))
     expected = {
+        **RESEARCH_PRECISION,
         "identity": identity,
         "microbatch_size": microbatch_size,
         "gradient_checkpointing": gradient_checkpointing,

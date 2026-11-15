@@ -10,6 +10,8 @@ import types
 
 import pytest
 
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
 
 @pytest.fixture
 def verifier():
@@ -25,6 +27,7 @@ def artifact(tmp_path, config="pi05_libero_potential"):
     directory.mkdir()
     normalization = b"{}"
     selection = {
+        **RESEARCH_PRECISION,
         "code": {"commit": "a" * 40, "source_snapshot_sha256": "b" * 64},
         "container_image_id": "sha256:" + "c" * 64,
         "inputs_sha256": {"weights": "d" * 64, "conversion_receipt": "e" * 64, "data_manifest": "f" * 64},
@@ -33,6 +36,7 @@ def artifact(tmp_path, config="pi05_libero_potential"):
         "gradient_checkpointing": False,
     }
     metadata = {
+        **RESEARCH_PRECISION,
         "schema_version": 1,
         "trainer": "potential_pi",
         "run_mode": "training",
@@ -44,9 +48,6 @@ def artifact(tmp_path, config="pi05_libero_potential"):
         "action_horizon": 10,
         "action_dim": 32,
         "freeze_vlm": True,
-        "expert_precision": "float32",
-        "vlm_precision": "bfloat16",
-        "matmul_precision": "highest",
         "code_commit": selection["code"]["commit"],
         "source_snapshot_sha256": selection["code"]["source_snapshot_sha256"],
         "container_image_id": selection["container_image_id"],
@@ -56,6 +57,7 @@ def artifact(tmp_path, config="pi05_libero_potential"):
         "normalization_hash": selection["normalization_sha256"],
     }
     metadata["resume_signature"] = {
+        **RESEARCH_PRECISION,
         "config": config,
         "seed": 42,
         "microbatch_size": 4,
@@ -78,7 +80,14 @@ def artifact(tmp_path, config="pi05_libero_potential"):
         {
             "__metadata__": {
                 key: str(metadata[key])
-                for key in ("schema_version", "trainer", "velocity_mode", "action_horizon", "action_dim")
+                for key in (
+                    "schema_version",
+                    "trainer",
+                    "velocity_mode",
+                    "action_horizon",
+                    "action_dim",
+                    *RESEARCH_PRECISION,
+                )
             }
         }
     ).encode()
@@ -117,6 +126,9 @@ def test_exact_terminal_run_can_be_reused(verifier, tmp_path, config):
         ("data_manifest_sha256", "1" * 64),
         ("normalization_hash", "1" * 64),
         ("matmul_precision", "high"),
+        ("vlm_precision", "bfloat16"),
+        ("expert_precision", "bfloat16"),
+        ("precision_protocol", "stale"),
     ],
 )
 def test_stale_or_nonterminal_checkpoint_is_rejected(verifier, tmp_path, field, value):
@@ -129,7 +141,7 @@ def test_stale_or_nonterminal_checkpoint_is_rejected(verifier, tmp_path, field, 
         verifier.verify_terminal(directory, "pi05_libero_potential", 42, selection)
 
 
-@pytest.mark.parametrize("field", ["microbatch_size", "gradient_checkpointing", "config"])
+@pytest.mark.parametrize("field", ["microbatch_size", "gradient_checkpointing", "config", "vlm_precision"])
 def test_changed_training_protocol_is_rejected(verifier, tmp_path, field):
     directory, selection = artifact(tmp_path)
     path = directory / "potential_metadata.json"
@@ -138,6 +150,7 @@ def test_changed_training_protocol_is_rejected(verifier, tmp_path, field):
         "microbatch_size": 8,
         "gradient_checkpointing": True,
         "config": "pi05_libero_b1",
+        "vlm_precision": "bfloat16",
     }[field]
     path.write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match=field):

@@ -8,6 +8,7 @@ import torch
 from transformers.cache_utils import DynamicCache
 
 from openpi.models_pytorch.pi0_pytorch import ActionContext
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.training.potential import ResumableBatchSampler
 from openpi.training.potential import load_training_checkpoint
 from openpi.training.potential import make_ema
@@ -50,7 +51,7 @@ def test_actual_pi05_restart_preserves_samples_corruption_optimizer_and_ema(tiny
     actions = torch.linspace(-1, 1, 8 * 3 * 4).reshape(8, 3, 4)
     optimizer = torch.optim.AdamW(model.expert_modules().parameters(), lr=1e-3)
     ema = make_ema(model.expert_modules())
-    signature = {"seed": 42, "optimizer": {"lr": 1e-3}, "source_snapshot_sha256": "a" * 64}
+    signature = {**RESEARCH_PRECISION, "seed": 42, "optimizer": {"lr": 1e-3}, "source_snapshot_sha256": "a" * 64}
 
     def step(network, opt, averaged, update, cursor):
         sampler = iter(ResumableBatchSampler(8, 2, 4, 42, start_microbatch=cursor))
@@ -73,7 +74,13 @@ def test_actual_pi05_restart_preserves_samples_corruption_optimizer_and_ema(tiny
         return trace
 
     step(model, optimizer, ema, 0, 0)
-    metadata = {"velocity_mode": "potential_dot", "action_horizon": 3, "action_dim": 4, "resume_signature": signature}
+    metadata = {
+        **RESEARCH_PRECISION,
+        "velocity_mode": "potential_dot",
+        "action_horizon": 3,
+        "action_dim": 4,
+        "resume_signature": signature,
+    }
     checkpoint = save_checkpoint(
         tmp_path / "1",
         model=model,

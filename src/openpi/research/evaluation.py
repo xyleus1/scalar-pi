@@ -19,6 +19,8 @@ import statistics
 import subprocess
 from typing import Any
 
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520, "libero_90": 400}
 PROTOCOL_ID = "openpi-libero-paired-v2"
@@ -387,7 +389,7 @@ def _validate_checkpoint_record(record: dict[str, Any], *, primary: bool) -> Non
         raise ValueError(f"Missing or invalid actual checkpoint research metadata: {record['checkpoint_id']}")
     if primary and research.get("run_mode") == "profile":
         raise ValueError("Profiling checkpoints cannot enter confirmatory evaluation")
-    expected = {"training_seed": record["training_seed"]}
+    expected = {"training_seed": record["training_seed"], **RESEARCH_PRECISION}
     if primary:
         if record["group"] not in {"B0", "B1", "P"}:
             raise ValueError("Unknown primary checkpoint group")
@@ -427,8 +429,10 @@ def validate_provenance(record: dict[str, Any]) -> dict:
         for actual, receipt in (("checkpoint_sha256", "model_sha256"), ("normalization_sha256", "normalization_hash")):
             if metadata[actual] != research.get(receipt):
                 raise ValueError(f"Actual served {actual} differs from the trainer's {receipt} receipt")
-    if not record.get("reference", False) and metadata.get("matmul_precision") != "highest":
-        raise ValueError("Research serving must use the declared highest matmul precision")
+    if not record.get("reference", False) and any(
+        metadata.get(key) != value for key, value in RESEARCH_PRECISION.items()
+    ):
+        raise ValueError("Research serving must use the current FP32 research precision protocol")
     if not provenance.get("container_image") or not metadata.get("runtime", {}).get("container_image"):
         raise ValueError("Record both model and simulator container identities")
     source = provenance.get("source", {})
@@ -580,6 +584,8 @@ def validate_results(
                 signature = research.get("resume_signature", {})
                 if not signature:
                     raise ValueError("Missing actual training protocol signature")
+                if any(signature.get(key) != value for key, value in RESEARCH_PRECISION.items()):
+                    raise ValueError("Training signature differs from the current FP32 research precision protocol")
                 training["protocol"] = {
                     name: value for name, value in signature.items() if name not in {"config", "seed", "initialization"}
                 }

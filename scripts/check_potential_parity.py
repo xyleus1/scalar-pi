@@ -20,6 +20,7 @@ from openpi.research.policy_checks import file_digest
 from openpi.research.policy_checks import input_digest
 from openpi.research.policy_checks import load_corpus
 from openpi.research.policy_checks import require_staged_tokenizer
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 
 def torch_joint_velocity(model, observation, actions, time):
@@ -32,7 +33,7 @@ def torch_joint_velocity(model, observation, actions, time):
     prefix, prefix_masks, prefix_ar = model.embed_prefix(images, image_masks, tokens, token_masks)
     suffix, suffix_masks, suffix_ar, condition = model.embed_suffix(state, actions, time)
     if model.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype != torch.float32:
-        raise ValueError("Native joint parity requires all-FP32 weights; mixed cached arithmetic is checked separately")
+        raise ValueError("Native joint parity requires the selected all-FP32 runtime")
     masks = torch.cat((prefix_masks, suffix_masks), dim=1)
     autoregressive = torch.cat((prefix_ar, suffix_ar), dim=1)
     (_, output), _ = model.paligemma_with_expert.forward(
@@ -78,6 +79,8 @@ def export_outputs(args):
     from openpi.training.config import get_config
 
     corpus = load_corpus(args.corpus)
+    if len(corpus["states"]) != 40 or not np.array_equal(corpus.get("task_indices"), np.arange(40)):
+        raise ValueError("Parity requires the audited corpus with one observation for each of all forty tasks")
     require_staged_tokenizer()
     config = get_config("pi05_libero")
     model_config = dataclasses.replace(config.model, dtype="float32", pytorch_compile_mode=None)
@@ -95,6 +98,9 @@ def export_outputs(args):
     result = {"input_sha256": np.asarray([input_digest(inputs) for inputs in transformed])}
     metadata = {
         "schema_version": 1,
+        **RESEARCH_PRECISION,
+        "corpus_observations": 40,
+        "task_indices": corpus["task_indices"].tolist(),
         "backend": args.backend,
         "precision": "float32",
         "corpus_sha256": file_digest(args.corpus),
@@ -154,22 +160,10 @@ def export_outputs(args):
                     outputs[f"actions_k{steps}"].append(
                         model.sample_actions("cuda:0", observation, noise=noise, num_steps=steps).cpu().numpy()
                     )
-            model.configure_expert_only(vlm_dtype=torch.bfloat16)
-            model.requires_grad_(requires_grad=False)
-            mixed_checks = []
-            for index, observation in enumerate(observations):
-                noise = torch.as_tensor(corpus["noise"][index][None], device="cuda:0")
-                time = torch.tensor([0.5], device="cuda:0")
-                cached = model.predict_velocity(noise, time, model.encode_context(observation))
-                mixed_checks.append(
-                    array_error(cached.cpu().numpy(), outputs["velocity_t05"][index], atol=2e-2, rtol=2e-2)
-                )
         metadata.update(
             hardware=torch.cuda.get_device_name(0),
             cuda_runtime=torch.version.cuda,
             cached_joint_fp32=cache_checks,
-            mixed_cached_vs_fp32=mixed_checks,
-            mixed_joint_supported=False,
         )
     result.update({name: np.concatenate(values) for name, values in outputs.items()})
     result["metadata_json"] = np.asarray(json.dumps(metadata, sort_keys=True))
@@ -188,23 +182,41 @@ def compare_exports(jax_path: Path, torch_path: Path) -> dict:
     converted = json.loads(str(torch_values["metadata_json"]))
     if source["backend"] != "jax" or converted["backend"] != "torch":
         raise ValueError("Supply JAX reference and Torch conversion exports in that order")
+    for metadata in (source, converted):
+        if metadata.get("precision") != "float32" or any(
+            metadata.get(key) != value for key, value in RESEARCH_PRECISION.items()
+        ):
+            raise ValueError("Parity requires the current FP32 research precision protocol")
+        if metadata.get("corpus_observations") != 40 or metadata.get("task_indices") != list(range(40)):
+            raise ValueError("Parity requires coverage of all forty audited tasks")
     for key in ("schema_version", "precision", "corpus_sha256", "normalization_sha256", "flow_time"):
         if source[key] != converted[key]:
             raise ValueError(f"Export protocol differs: {key}")
     if not np.array_equal(jax_values["input_sha256"], torch_values["input_sha256"]):
         raise ValueError("Exports did not receive identical transformed observations")
+    if jax_values["input_sha256"].shape != (40,):
+        raise ValueError("Parity requires forty transformed-input identities")
+    for values in (jax_values, torch_values):
+        for name in ("velocity_t05", "actions_k1", "actions_k10"):
+            if values[name].shape != (40, 10, 32):
+                raise ValueError(f"Parity output {name} must cover all forty observations with shape (40, 10, 32)")
     errors = {
         name: array_error(torch_values[name], jax_values[name], atol=1e-4, rtol=1e-4)
         for name in ("velocity_t05", "actions_k1", "actions_k10")
     }
-    count = len(jax_values["input_sha256"])
-    if count < 1 or any(len(converted[key]) != count for key in ("cached_joint_fp32", "mixed_cached_vs_fp32")):
-        raise ValueError("Every exported observation requires both cache and precision checks")
-    cache_checks = [*converted["cached_joint_fp32"], *converted["mixed_cached_vs_fp32"]]
+    cache_checks = converted.get("cached_joint_fp32")
+    if not isinstance(cache_checks, list) or len(cache_checks) != 40:
+        raise ValueError("Every exported observation requires an FP32 cache check")
+    if any(
+        not isinstance(check, dict) or check.get("atol") != 1e-4 or check.get("rtol") != 1e-4 for check in cache_checks
+    ):
+        raise ValueError("FP32 cache checks require unchanged atol=rtol=1e-4")
     return {
         "schema_version": 1,
+        **RESEARCH_PRECISION,
+        "corpus_observations": 40,
         "purpose": "direct_model_conversion_and_cache_parity",
-        "passed": all(value["passed"] for value in [*errors.values(), *cache_checks]),
+        "passed": all(value.get("passed") is True for value in [*errors.values(), *cache_checks]),
         "jax_export_sha256": file_digest(jax_path),
         "torch_export_sha256": file_digest(torch_path),
         "jax": source,
@@ -212,7 +224,7 @@ def compare_exports(jax_path: Path, torch_path: Path) -> dict:
         "conversion_errors": errors,
         "limitations": [
             "Engineering numerical tolerances, not a task-performance guarantee; no scalar model is compared here.",
-            "Native joint attention does not support mixed BF16 VLM/FP32 expert weights. Mixed precision is measured against the all-FP32 reference.",
+            "The matched study deploys FP32 VLM and expert arithmetic; this report does not qualify BF16 execution.",
         ],
     }
 

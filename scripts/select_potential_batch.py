@@ -16,6 +16,9 @@ import subprocess
 import sys
 import time
 
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
+
 CONFIG = "pi05_libero_potential"
 BATCHES = (1, 2, 4, 8, 16, 32, 64, 128, 256)
 
@@ -48,7 +51,7 @@ def verify_report(args, *, repository=None):
         or type(report.get("microbatch_size")) is not int
         or report.get("microbatch_size") not in BATCHES
         or type(report.get("gradient_checkpointing")) is not bool
-        or report.get("matmul_precision") != "highest"
+        or any(report.get(key) != value for key, value in RESEARCH_PRECISION.items())
     ):
         raise ValueError("Invalid batch-selection report")
     image = os.environ.get("SCALAR_PI_IMAGE_ID")
@@ -134,6 +137,7 @@ def verify_profile(args):
         or profile.get("timed_optimizer_updates") != 100
         or profile.get("effective_batch_size") != 256
         or profile.get("identity") != qualification["identity"]
+        or any(profile.get(key) != value for key, value in RESEARCH_PRECISION.items())
     ):
         raise ValueError("Reuse requires a complete matching 10-warmup/100-update GPU profile")
     for field in ("measurement", "run_manifest", "checkpoint_measurements"):
@@ -157,7 +161,7 @@ def verify_profile(args):
         raise ValueError("Profile inputs differ from current staged inputs")
     if (
         protocol.get("config") != args.config
-        or protocol.get("matmul_precision") != "highest"
+        or any(protocol.get(key) != value for key, value in RESEARCH_PRECISION.items())
         or protocol.get("deterministic") is not True
         or protocol.get("code_commit") != identity["code_commit"]
         or profile.get("qualification_sha256") != expected["qualification_sha256"]
@@ -186,7 +190,14 @@ def verify_profile(args):
     if [row["seconds"] for row in publications] != profile.get("checkpoint_seconds"):
         raise ValueError("Profile publication summary differs from retained measurements")
     checkpoint = Path(publications[-1]["checkpoint"])
-    metadata = json.loads((checkpoint / "potential_metadata.json").read_text())
+    metadata = validate_checkpoint_metadata(
+        checkpoint,
+        velocity_mode="potential_dot" if args.config == CONFIG else "direct",
+        action_horizon=10,
+        action_dim=32,
+    )
+    if metadata is None or metadata.get("trainer") != "potential_pi":
+        raise ValueError("Profile checkpoint requires current research metadata")
     if metadata.get("run_mode") != "profile" or metadata.get("optimizer_updates") != 110:
         raise ValueError("Profile checkpoint is not the final diagnostic boundary")
     for filename, key in (("model.safetensors", "model_sha256"), ("raw_model.safetensors", "raw_model_sha256")):
@@ -237,6 +248,7 @@ def select(args):
                 or profile.get("timed_optimizer_updates") != 1
                 or profile.get("effective_batch_size") != 256
                 or profile.get("checkpoint_seconds") != []
+                or any(profile.get(key) != value for key, value in RESEARCH_PRECISION.items())
             ):
                 raise ValueError(
                     f"Candidate did not complete two real optimizer/EMA updates without saving: {profile_path}"
@@ -265,6 +277,7 @@ def select(args):
         manifest.get("source_weights_sha256") != inputs["weights"]
         or manifest.get("base_conversion_receipt_sha256") != inputs["conversion_receipt"]
         or manifest.get("data_manifest_sha256") != inputs["data_manifest"]
+        or any(manifest.get("protocol", {}).get(key) != value for key, value in RESEARCH_PRECISION.items())
     ):
         raise ValueError("Selected candidate inputs differ from the requested verified inputs")
     result = {
@@ -276,7 +289,7 @@ def select(args):
         "microbatch_size": selected["microbatch_size"],
         "gradient_checkpointing": selected["gradient_checkpointing"],
         "effective_batch_size": 256,
-        "matmul_precision": "highest",
+        **RESEARCH_PRECISION,
         "seed": args.seed,
         "hourly_rate_usd": args.hourly_rate,
         "container_image_id": image_id,

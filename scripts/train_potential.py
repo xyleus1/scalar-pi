@@ -44,6 +44,7 @@ from openpi.research.policy_checks import require_staged_tokenizer
 from openpi.research.qualification import can_start_update
 from openpi.research.qualification import verify_qualification
 from openpi.research.qualification import verify_recovery
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
 from openpi.training.potential import ResumableBatchSampler
 from openpi.training.potential import cost_forecast
@@ -302,7 +303,7 @@ def main(argv=None):
             )
         base_conversion = validate_base_conversion(source, require_receipt=True)
     safetensors.torch.load_model(model, weight_file, strict=True)
-    model.configure_expert_only(vlm_dtype=torch.bfloat16)
+    model.configure_expert_only(vlm_dtype=torch.float32)
     if args.resume is None and config.model.initialization == "zero_output":
         model.zero_action_output()
     model.to(device)
@@ -324,6 +325,7 @@ def main(argv=None):
     ema = make_ema(expert, config.ema_decay)
     schedule = dataclasses.asdict(config.lr_schedule)
     signature = {
+        **RESEARCH_PRECISION,
         "config": args.config,
         "seed": args.seed,
         "microbatch_size": args.microbatch_size,
@@ -443,8 +445,7 @@ def main(argv=None):
         "freeze_vlm": True,
         "action_horizon": config.model.action_horizon,
         "action_dim": config.model.action_dim,
-        "expert_precision": "float32",
-        "vlm_precision": "bfloat16",
+        **RESEARCH_PRECISION,
         "normalization_hash": norm_hash,
         "training_seed": args.seed,
         "code_commit": manifest["code"]["commit"],
@@ -626,6 +627,7 @@ def main(argv=None):
             "qualification_sha256": manifest["qualification_sha256"],
             "recovery_sha256": manifest["recovery_sha256"],
             "identity": qualification["identity"],
+            **RESEARCH_PRECISION,
             "forecast_one_reference_run": cost_forecast(mean_seconds, config.num_train_steps, args.hourly_rate),
             "forecast_three_same_method_seeds": cost_forecast(
                 mean_seconds, config.num_train_steps, args.hourly_rate, runs=3

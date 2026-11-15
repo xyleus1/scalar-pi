@@ -8,6 +8,7 @@ from openpi.research.policy_checks import input_digest
 from openpi.research.policy_checks import load_corpus
 from openpi.research.policy_checks import require_staged_tokenizer
 from openpi.research.policy_checks import timing_summary
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 from scripts.benchmark_potential import measure_calls
 from scripts.check_potential_parity import compare_exports
 
@@ -79,23 +80,29 @@ def test_timing_excludes_warmup_reuses_noise_and_separates_executed_throughput()
 def test_parity_comparison_rejects_changed_inputs_and_detects_output_error(tmp_path):
     def write(backend, *, digest="same", delta=0, cache_checks=True):
         metadata = {
+            **RESEARCH_PRECISION,
             "schema_version": 1,
             "backend": backend,
             "precision": "float32",
             "corpus_sha256": "corpus",
             "normalization_sha256": "norms",
             "flow_time": 0.5,
-            "cached_joint_fp32": [{"passed": True}] if cache_checks else [],
-            "mixed_cached_vs_fp32": [{"passed": True}],
+            "corpus_observations": 40,
+            "task_indices": list(range(40)),
+            "cached_joint_fp32": [
+                {"passed": True, "atol": 1e-4, "rtol": 1e-4, "max_abs": 0.0, "rms": 0.0} for _ in range(40)
+            ]
+            if cache_checks
+            else [],
         }
         path = tmp_path / f"{backend}.npz"
         np.savez(
             path,
             metadata_json=np.asarray(json.dumps(metadata)),
-            input_sha256=np.asarray([digest]),
-            velocity_t05=np.ones((1, 10, 32)) + delta,
-            actions_k1=np.ones((1, 10, 32)),
-            actions_k10=np.ones((1, 10, 32)),
+            input_sha256=np.asarray([f"{digest}-{index}" for index in range(40)]),
+            velocity_t05=np.ones((40, 10, 32)) + delta,
+            actions_k1=np.ones((40, 10, 32)),
+            actions_k10=np.ones((40, 10, 32)),
         )
         return path
 
@@ -106,6 +113,49 @@ def test_parity_comparison_rejects_changed_inputs_and_detects_output_error(tmp_p
         compare_exports(original, write("torch", digest="different"))
     with pytest.raises(ValueError, match="Every exported observation"):
         compare_exports(original, write("torch", cache_checks=False))
+
+
+@pytest.mark.parametrize("change", ["bf16", "missing_precision", "short_corpus", "duplicate_task", "loose_cache"])
+def test_parity_cannot_admit_stale_precision_or_incomplete_corpus(tmp_path, change):
+    def export(backend):
+        metadata = {
+            **RESEARCH_PRECISION,
+            "schema_version": 1,
+            "backend": backend,
+            "precision": "float32",
+            "corpus_sha256": "corpus",
+            "normalization_sha256": "norms",
+            "flow_time": 0.5,
+            "corpus_observations": 40,
+            "task_indices": list(range(40)),
+            "cached_joint_fp32": [
+                {"passed": True, "atol": 1e-4, "rtol": 1e-4, "max_abs": 0.0, "rms": 0.0} for _ in range(40)
+            ],
+        }
+        count = 40
+        if backend == "torch":
+            if change == "bf16":
+                metadata["vlm_precision"] = "bfloat16"
+            elif change == "missing_precision":
+                metadata.pop("precision_protocol")
+            elif change == "short_corpus":
+                count = metadata["corpus_observations"] = 39
+                metadata["task_indices"] = list(range(count))
+            elif change == "duplicate_task":
+                metadata["task_indices"][-1] = 38
+            elif change == "loose_cache":
+                metadata["cached_joint_fp32"][-1]["atol"] = 2e-2
+        path = tmp_path / f"{backend}.npz"
+        np.savez(
+            path,
+            metadata_json=np.asarray(json.dumps(metadata)),
+            input_sha256=np.asarray([str(index) for index in range(count)]),
+            **{name: np.zeros((count, 10, 32)) for name in ("velocity_t05", "actions_k1", "actions_k10")},
+        )
+        return path
+
+    with pytest.raises(ValueError, match="precision|forty|unchanged"):
+        compare_exports(export("jax"), export("torch"))
 
 
 def test_parity_rejects_nonfinite_values():

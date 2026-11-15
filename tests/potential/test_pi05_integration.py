@@ -16,6 +16,7 @@ from transformers import SiglipVisionConfig
 from openpi.models import gemma
 from openpi.models_pytorch import gemma_pytorch
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
+from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 
 @pytest.fixture
@@ -89,6 +90,31 @@ def test_actual_expert_double_backward_and_frozen_vlm(tiny_model):
         assert torch.isfinite(parameter.grad).all(), name
     assert all(p.grad is None for p in model.paligemma_with_expert.paligemma.parameters())
     assert not model.paligemma_with_expert.paligemma.training
+
+
+@pytest.mark.parametrize("arm", ["B0", "B1", "P"])
+def test_matched_arms_update_only_fp32_expert_and_preserve_fp32_vlm(tiny_model, arm):
+    model, observation = tiny_model
+    model.velocity_mode = "potential_dot" if arm == "P" else "direct"
+    model.configure_expert_only()
+    if arm != "B0":
+        model.zero_action_output()
+    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
+    backbone = model.paligemma_with_expert.paligemma
+    before = {name: parameter.detach().clone() for name, parameter in backbone.named_parameters()}
+    head_before = model.action_out_proj.weight.detach().clone()
+    optimizer = torch.optim.SGD(model.expert_modules().parameters(), lr=0.01)
+    model.train()
+    actions = torch.randn(2, 3, 4)
+    loss = model(observation, actions, noise=torch.randn_like(actions), time=torch.tensor([0.3, 0.7])).mean()
+    loss.backward()
+    optimizer.step()
+    assert torch.isfinite(loss)
+    assert not torch.equal(model.action_out_proj.weight, head_before)
+    for name, parameter in backbone.named_parameters():
+        assert parameter.grad is None, name
+        assert not parameter.requires_grad, name
+        torch.testing.assert_close(parameter, before[name], rtol=0, atol=0)
 
 
 def test_bfloat16_frozen_vlm_and_float32_expert_support_double_backward(tiny_model):
@@ -193,8 +219,7 @@ def test_zero_head_controls_match_and_begin_learning(tiny_model):
     assert torch.count_nonzero(model.action_out_proj.weight.grad) > 0
 
 
-@pytest.mark.parametrize("vlm_dtype", [torch.float32, torch.bfloat16])
-def test_parity_diagnostic_exercises_actual_joint_and_cached_velocity(tiny_model, vlm_dtype):
+def test_fp32_parity_exercises_actual_joint_and_cached_velocity(tiny_model):
     from scripts.check_potential_parity import torch_joint_velocity
 
     model, observation = tiny_model
@@ -205,10 +230,8 @@ def test_parity_diagnostic_exercises_actual_joint_and_cached_velocity(tiny_model
     time = torch.tensor([0.2, 0.8])
     with torch.no_grad():
         joint = torch_joint_velocity(model, observation, actions, time)
-        model.configure_expert_only(vlm_dtype=vlm_dtype)
         cached = model.predict_velocity(actions, time, model.encode_context(observation))
-    tolerance = 2e-2 if vlm_dtype == torch.bfloat16 else 1e-4
-    torch.testing.assert_close(joint, cached, atol=tolerance, rtol=tolerance)
+    torch.testing.assert_close(joint, cached, atol=1e-4, rtol=1e-4)
 
 
 def test_actual_policy_loader_sets_research_precision_and_retains_input_gradients(tiny_model, monkeypatch, tmp_path):
@@ -243,6 +266,7 @@ def test_actual_policy_loader_sets_research_precision_and_retains_input_gradient
     (tmp_path / "model.safetensors").write_bytes(b"fixture weights loaded by stub")
     norms = {"state": NormStats(mean=np.zeros(4), std=np.ones(4), q01=-np.ones(4), q99=np.ones(4))}
     receipt = {
+        **RESEARCH_PRECISION,
         "schema_version": 1,
         "trainer": "potential_pi",
         "model_sha256": hashlib.sha256(b"fixture weights loaded by stub").hexdigest(),
@@ -259,6 +283,9 @@ def test_actual_policy_loader_sets_research_precision_and_retains_input_gradient
     policy = policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
     assert torch.get_float32_matmul_precision() == "highest"
     assert policy.metadata["matmul_precision"] == "highest"
+    assert policy.metadata["vlm_precision"] == policy.metadata["expert_precision"] == "float32"
+    assert policy.metadata["precision_protocol"] == "potential_pi_fp32_v1"
+    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
     assert policy.metadata["checkpoint_sha256"] == hashlib.sha256(b"fixture weights loaded by stub").hexdigest()
     assert len(policy.metadata["normalization_sha256"]) == 64
     result = policy.infer(
