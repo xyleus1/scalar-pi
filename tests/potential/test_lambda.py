@@ -525,7 +525,9 @@ def test_supervised_sessions_have_stage_limits(cloud, config, stage, hours):
         cloud.session_deadline(config, stage, hours, 1000)
 
 
-@pytest.mark.parametrize(("stage", "hours"), [("canary", 0.25), ("qualification", 2), ("qualification", 3), ("research", 4)])
+@pytest.mark.parametrize(
+    ("stage", "hours"), [("canary", 0.25), ("qualification", 2), ("qualification", 3), ("research", 4)]
+)
 def test_supervised_session_deadline_uses_requested_duration(cloud, config, stage, hours):
     assert cloud.session_deadline(config, stage, hours, 1000) == 1000 + hours * 3600
 
