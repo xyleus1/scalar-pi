@@ -36,18 +36,38 @@ has already been prepared with the supplied key-loader path, a project SSH-key
 path, the observed operator IPv4 address, and an available GPU Base 22.04 image
 ID. **`credits_verified` remains false.**
 
-Before paid preparation, check Lambda Billing for credit eligibility and expiry,
-and the console's filesystem price. Record actual noncompute spending and a
-remaining storage/tax reserve in the private settings, then set
-`credits_verified` to true. The API inspection does not verify credit terms.
+Check Lambda Billing for credit eligibility and expiry and the console's
+filesystem price. Set `credits_verified` to true only after verifying those
+credit terms; the API inspection does not verify them. Record actual noncompute
+spending and a remaining storage/tax reserve in the private settings.
 Recheck `operator_cidr` if your public IP changes. The image is pinned by ID and
 checked against Lambda's current regional catalog at launch.
+
+An existing user authorization to pay for the project can instead be recorded
+with literal `paid_budget_authorized=true` and a nonempty
+`paid_authorization_evidence` reference to the approval and its dollar limits.
+This permits preparation, qualification, and research within the existing
+$2,000 project and $100 qualification ceilings while keeping
+`credits_verified=false`. Forecasts use the full quoted compute price without
+assuming credits apply. Each launch's allowance records its `billing_basis` and,
+for this paid basis, the authorization evidence reference.
+
+The paid basis also requires an explicit nonnegative
+`qualification_noncompute_reserve_usd` for remaining qualification storage and
+taxes. This reserve counts toward the cumulative $100 qualification allowance,
+along with previous canaries, qualification compute, and incurred noncompute
+charges. It is part of the project-wide `noncompute_reserve_usd`; the project
+calculation uses the larger reserve rather than adding them. Paid preparation
+checks the qualification allowance with a conservative 15-minute compute reserve
+before creating resources. Research still requires its measured budget decision,
+source/container identity, and original H100 PCIe hardware profile.
 
 An explicitly approved infrastructure-only exception can instead set private
 `canary_allowance_usd` (at most $15) and `canary_noncompute_reserve_usd`. This keeps
 `credits_verified=false`, permits only preparation and the canonical 15-minute
 canary, and checks cumulative canary spending plus the reserve before admission.
-Qualification and research remain blocked until billing is verified. The current
+Qualification and research require verified credits or the paid authorization
+basis above. The current
 approved exception uses a $15 cumulative allowance and a $0.75 noncompute reserve.
 The approved retries are bounded infrastructure probes within this cumulative
 cap; they do not authorize qualification or research.

@@ -134,6 +134,13 @@ def validate_config(config):
         raise ValueError("This study is authorized for $2,000, with $100 for qualification")
     for key in ("noncompute_spent_usd", "noncompute_reserve_usd"):
         finite_positive(config[key], key, zero=True)
+    finite_positive(
+        config.get("qualification_noncompute_reserve_usd", 0), "qualification_noncompute_reserve_usd", zero=True
+    )
+    if "paid_budget_authorized" in config and not isinstance(config["paid_budget_authorized"], bool):
+        raise ValueError("paid_budget_authorized must be a boolean")
+    if config.get("paid_budget_authorized") is True:
+        paid_authorization(config)
     forecast_rate = config.get("forecast_hourly_rate_usd", config["max_hourly_rate_usd"])
     finite_positive(forecast_rate, "forecast_hourly_rate_usd")
     if forecast_rate < config["max_hourly_rate_usd"]:
@@ -150,12 +157,28 @@ def canary_allowance(config):
     return allowance, reserve
 
 
+def paid_authorization(config):
+    evidence = config.get("paid_authorization_evidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise ValueError("Paid budget authorization requires nonempty paid_authorization_evidence")
+    finite_positive(
+        config.get("qualification_noncompute_reserve_usd"), "qualification_noncompute_reserve_usd", zero=True
+    )
+    return {"billing_basis": "authorized_paid_budget", "paid_authorization_evidence": evidence}
+
+
 def require_billing(config, stage):
     if config.get("credits_verified") is True:
-        return
+        return {"billing_basis": "verified_credits"}
+    if config.get("paid_budget_authorized") is True:
+        return paid_authorization(config)
     if stage != "canary":
-        raise ValueError("Credits must be verified before qualification or research; the exception is canary-only")
+        raise ValueError(
+            "Qualification and research require verified credits or explicit paid budget authorization; "
+            "the limited exception is canary-only"
+        )
     canary_allowance(config)
+    return {"billing_basis": "authorized_canary"}
 
 
 def session_deadline(config, stage, hours, started):
@@ -194,7 +217,7 @@ def accounted_cost(run):
 
 
 def check_allowance(config, state, hours, rate, stage, budget_report=None):
-    require_billing(config, stage)
+    billing = require_billing(config, stage)
     finite_positive(hours, "max_hours")
     finite_positive(rate, "hourly_rate")
     forecast_rate = finite_positive(config.get("forecast_hourly_rate_usd", rate), "forecast_hourly_rate_usd")
@@ -211,7 +234,11 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
             raise ValueError("Cumulative canary cost plus reserve exceeds the approved canary allowance")
         canary_cost = {"canary_allowance_usd": allowance, "canary_with_reserve_usd": canary_forecast}
     spent = sum(accounted_cost(run) for run in state["runs"]) + config["noncompute_spent_usd"]
-    reserve = config["noncompute_reserve_usd"]
+    qualification_reserve = finite_positive(
+        config.get("qualification_noncompute_reserve_usd", 0), "qualification_noncompute_reserve_usd", zero=True
+    )
+    # The phase reserve is part of the project reserve, not an additional charge.
+    reserve = max(config["noncompute_reserve_usd"], qualification_reserve)
     if budget_report:
         reserve = max(
             reserve,
@@ -220,13 +247,18 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
     forecast = spent + reserve + 1.2 * hours * forecast_rate
     if forecast > config["budget_usd"]:
         raise ValueError("Session lifetime plus reserve exceeds the remaining project budget")
+    phase_cost = {}
     if stage in {"canary", "qualification"}:
         phase_spent = sum(accounted_cost(run) for run in state["runs"] if run["stage"] in {"canary", "qualification"})
-        if (
-            phase_spent + config["noncompute_spent_usd"] + 1.2 * hours * forecast_rate
-            > config["qualification_budget_usd"]
-        ):
+        phase_forecast = (
+            phase_spent + config["noncompute_spent_usd"] + qualification_reserve + 1.2 * hours * forecast_rate
+        )
+        if phase_forecast > config["qualification_budget_usd"]:
             raise ValueError("Qualification session exceeds the $100 phase allowance")
+        phase_cost = {
+            "qualification_noncompute_reserve_usd": qualification_reserve,
+            "qualification_with_reserve_usd": phase_forecast,
+        }
     else:
         if not budget_report or budget_report.get("selected_study") not in {"full", "pilot"}:
             raise ValueError("Research requires a measured full/pilot budget decision")
@@ -246,6 +278,8 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
         "forecast_hourly_rate_usd": forecast_rate,
         "remaining_noncompute_reserve_usd": reserve,
         "with_reserve_usd": forecast,
+        **billing,
+        **phase_cost,
         **canary_cost,
     }
 
@@ -284,9 +318,12 @@ def select_type(client, config):
 
 
 def prepare(client, config, state, state_path):
-    require_billing(config, "canary")
+    billing = require_billing(config, "canary")
     rate = select_type(client, config)
-    if config.get("credits_verified") is not True:
+    if billing["billing_basis"] == "authorized_paid_budget":
+        # Paid preparation reserves a short qualification session before mutation.
+        check_allowance(config, state, 0.25, rate, "qualification")
+    elif billing["billing_basis"] == "authorized_canary":
         # The exception covers only storage/key preparation and one bounded
         # infrastructure probe. It never changes the billing-verification flag.
         check_allowance(config, state, 0.25, rate, "canary")

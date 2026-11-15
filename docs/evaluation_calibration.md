@@ -11,6 +11,21 @@ profile checkpoints; those checkpoints remain ineligible for confirmatory scores
 The four-episode smoke supplies observed WebSocket overhead. No success rate or
 early-success episode length enters the cost estimate.
 
+The complete phase can now be launched directly from PowerShell:
+
+```powershell
+& $lambda run --script scripts/lambda/calibrate.sh --commit $commit --max-hours 2 --execute
+```
+
+It verifies batch selection and all three canonical profiles, selects the sole
+complete smoke manifest, and writes `reports/evaluation_calibration_spec.json`
+once. Later sessions preserve that specification and resume its completed
+components. An existing aggregate is recomputed from its retained evidence and
+compared before reuse. If several complete smoke runs exist, identify the intended
+one by exporting `SMOKE_MANIFEST` in a local wrapper that calls `calibrate.sh`.
+An incomplete or failed component remains an investigation step: preserve its
+logs and spec before choosing a fresh component output directory.
+
 ## Render the concrete specification
 
 From `/lambda/nfs/scalar-pi/repo`, set `SMOKE_MANIFEST` to the retained manifest from
@@ -67,6 +82,47 @@ use a fresh component output directory/spec rather than overwriting failed evide
 An aggregate timing report is published only after every component validates.
 
 ## Budget and evaluation inputs
+
+After calibration, prepare `/data/experiments/budget_inputs.json` from
+`configs/potential/budget_inputs.example.json`. Copy only the cost evidence needed
+by the worker; credentials and the private controller configuration stay local.
+Every accounting/platform/storage `evidence` object maps an absolute retained
+file path to its SHA256. A descriptive `measurement_source` is also required.
+The example's nulls and empty evidence deliberately prevent admission.
+
+- `accounting.as_of_unix` must be after the completed profile and calibration
+  reports. `incurred_cost_usd` includes all spending through that snapshot.
+  `current_session_cost_ceiling_usd` additionally reserves the entire budget
+  session through termination. `future_nonstorage_reserve_usd` explicitly covers
+  future taxes or other nonstorage costs; use measured/accounted zero only when
+  the retained evidence supports it. Future storage belongs only in `storage`.
+- `platform.startup_overhead_seconds` is the observed platform cost before the
+  trainer starts: boot, setup, image transfer/load and orchestration. The helper
+  adds the largest measured trainer startup from the three profiles.
+  `shutdown_reserve_seconds` must cover observed shutdown and be at least 600.
+- `storage` records the actual regional GiB-month price, current measured GiB,
+  projected additional retained GiB, and retention through projected completion
+  plus the 336-hour export window. Preserve the price, usage and projection
+  evidence; no example price or default projection is used.
+- `completed_training` and `completed_evaluation` start empty. Later forecasts
+  may list actual checkpoint/suite/task artifacts using the existing preflight
+  schema; the preflight verifies them before subtracting work.
+
+After the input and its evidence have been transferred to persistent storage,
+launch the bounded decision phase:
+
+```powershell
+& $lambda run --script scripts/lambda/budget.sh --commit $commit --max-hours 1 --execute
+```
+
+This revalidates all profiles, recovery/batch receipts and calibration evidence,
+derives per-arm mean update times and maximum measured publication times, and
+sets each save interval to `max(1, min(5000, floor(3600 / mean_update_seconds)))`.
+It preserves the measured input as `reports/budgets/SESSION.json`, writes the
+immutable `reports/study_decision.json` full/pilot lock through the existing
+preflight, and publishes `reports/budget.json` for the research controller.
+Refresh accounting and the complete forecast before later research sessions.
+The full/pilot scientific scope and identity remain locked.
 
 The report provides `evaluation_seconds_per_episode[group]["1"|"10"][suite]`,
 `task_budget_seconds` with the same keys, `server_start_budget_seconds`, source and

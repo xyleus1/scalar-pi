@@ -13,6 +13,7 @@ RUN apt-get update && \
     apt-get install -y \
     git \
     make \
+    cmake \
     g++ \
     clang \
     libosmesa6-dev \
@@ -35,16 +36,20 @@ ENV UV_LINK_MODE=copy
 # leak out of the container when we mount the application code.
 ENV UV_PROJECT_ENVIRONMENT=/.venv
 
-# Copy the requirements files so we can install dependencies.
+# The complete lock includes the upstream LIBERO and client dependencies.
 # The rest of the project is mounted as a volume, so we don't need to rebuild on changes.
 # This strategy is best for development-style usage.
-COPY ./examples/libero/requirements.txt /tmp/requirements.txt
-COPY ./third_party/libero/requirements.txt /tmp/requirements-libero.txt
-COPY ./packages/openpi-client/pyproject.toml /tmp/openpi-client/pyproject.toml
+COPY ./examples/libero/requirements.lock.txt /tmp/requirements.lock.txt
 
 # Install python dependencies.
 RUN uv venv --python 3.8 $UV_PROJECT_ENVIRONMENT
-RUN uv pip sync /tmp/requirements.txt /tmp/requirements-libero.txt /tmp/openpi-client/pyproject.toml --extra-index-url https://download.pytorch.org/whl/cu113 --index-strategy=unsafe-best-match
+RUN uv pip sync --python /.venv/bin/python /tmp/requirements.lock.txt \
+    --build-constraint /tmp/requirements.lock.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu113 --index-strategy=unsafe-best-match
+RUN uv pip check --python /.venv/bin/python
+# Imports only: no checkpoint, renderer, environment, or GPU workload is created.
+RUN HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled /.venv/bin/python -c \
+    "import h5py, hydra, tokenizers, transformers, tree, wandb; from websockets.sync.client import connect; print('Simulator dependency imports passed')"
 ENV PYTHONPATH=/app:/app/packages/openpi-client/src:/app/third_party/libero
 
 # Create a default config file to avoid an input prompt from LIBERO's init script.

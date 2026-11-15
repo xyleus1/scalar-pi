@@ -40,6 +40,18 @@ def config(tmp_path):
     }
 
 
+@pytest.fixture
+def paid_config(config):
+    return {
+        **config,
+        "credits_verified": False,
+        "paid_budget_authorized": True,
+        "paid_authorization_evidence": "fixture: user approved $2,000 project and $100 qualification",
+        "qualification_noncompute_reserve_usd": 20,
+        "forecast_hourly_rate_usd": 3.79,
+    }
+
+
 class FakeLambda:
     def __init__(self, config):
         self.calls = []
@@ -533,6 +545,136 @@ def test_forecast_price_and_storage_are_reserved_without_double_counting(cloud, 
     report["remaining_noncompute_cost_usd"] = 501
     with pytest.raises(ValueError, match="remaining balance"):
         cloud.check_allowance(config, {"runs": []}, 4, 3.29, "research", report)
+
+
+@pytest.mark.parametrize("authorized", [None, False, 1, "true"])
+def test_paid_qualification_requires_literal_authorization_before_api_calls(cloud, paid_config, tmp_path, authorized):
+    if authorized is None:
+        del paid_config["paid_budget_authorized"]
+    else:
+        paid_config["paid_budget_authorized"] = authorized
+    client = FakeLambda(paid_config)
+    with pytest.raises(ValueError, match="paid budget authorization"):
+        cloud.run_session(
+            client, paid_config, {"runs": []}, tmp_path / "state.json", SimpleNamespace(stage="qualification")
+        )
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("evidence", [None, "", " ", True])
+def test_paid_authorization_requires_evidence_before_api_calls(cloud, paid_config, tmp_path, evidence):
+    paid_config["paid_authorization_evidence"] = evidence
+    client = FakeLambda(paid_config)
+    with pytest.raises(ValueError, match="paid_authorization_evidence"):
+        cloud.validate_config(paid_config)
+    with pytest.raises(ValueError, match="paid_authorization_evidence"):
+        cloud.prepare(client, paid_config, {"resources": {}, "runs": []}, tmp_path / "state.json")
+    assert client.calls == []
+    assert not Path(paid_config["ssh_key_path"]).exists()
+
+
+@pytest.mark.parametrize("reserve", [None, -1, float("nan"), float("inf"), True])
+def test_paid_authorization_requires_explicit_finite_qualification_reserve(cloud, paid_config, reserve):
+    if reserve is None:
+        del paid_config["qualification_noncompute_reserve_usd"]
+    else:
+        paid_config["qualification_noncompute_reserve_usd"] = reserve
+    with pytest.raises(ValueError, match="qualification_noncompute_reserve_usd"):
+        cloud.validate_config(paid_config)
+    with pytest.raises(ValueError, match="qualification_noncompute_reserve_usd"):
+        cloud.check_allowance(paid_config, {"runs": []}, 1, 3.29, "qualification")
+
+
+def test_paid_qualification_reserves_phase_cost_without_double_counting_project_cost(cloud, paid_config):
+    state = {
+        "runs": [
+            {"started_unix": 0, "ended_unix": 7200, "hourly_rate_usd": 3.29, "stage": "canary"},
+            {"started_unix": 0, "ended_unix": 72000, "hourly_rate_usd": 3.29, "stage": "qualification"},
+        ]
+    }
+    allowance = cloud.check_allowance(paid_config, state, 1, 3.29, "qualification")
+    assert allowance["qualification_with_reserve_usd"] == pytest.approx(22 * 3.29 + 20 + 1.2 * 3.79)
+    assert allowance["with_reserve_usd"] == pytest.approx(22 * 3.29 + 100 + 1.2 * 3.79)
+    with pytest.raises(ValueError, match="phase allowance"):
+        cloud.check_allowance(paid_config, state, 2, 3.29, "qualification")
+    paid_config["budget_usd"] = 175
+    with pytest.raises(ValueError, match="remaining project budget"):
+        cloud.check_allowance(paid_config, state, 1, 3.29, "qualification")
+
+
+@pytest.mark.parametrize("stage", ["qualification", "research"])
+def test_paid_session_records_authorization_and_terminates_without_claiming_credits(
+    cloud, paid_config, tmp_path, monkeypatch, stage
+):
+    cloud.validate_config(paid_config)
+    report = tmp_path / "budget.json"
+    report.write_text(
+        json.dumps(
+            {
+                "selected_study": "pilot",
+                "budget_usd": 2000,
+                "live_hourly_rate_usd": 3.29,
+                "forecast_hourly_rate_usd": 3.79,
+                "remaining_compute_cost_with_headroom_usd": 100,
+                "experiment_identity": {"code_commit": "a" * 40, "container_image_id": "sha256:" + "b" * 64},
+                "study_lock_sha256": "c" * 64,
+            }
+        )
+    )
+    client = FakeLambda(paid_config)
+    state = {"schema_version": 1, "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}, "runs": []}
+    args = SimpleNamespace(
+        max_hours=1,
+        stage=stage,
+        budget_report=report if stage == "research" else None,
+        commit="a" * 40,
+        script=ROOT / "scripts/lambda/qualify.sh",
+    )
+    monkeypatch.setattr(cloud.subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        cloud.subprocess, "Popen", lambda *_a, **_k: SimpleNamespace(stdin=io.BytesIO(), poll=lambda: 0, returncode=0)
+    )
+    state_path = tmp_path / "state.json"
+    cloud.run_session(client, paid_config, state, state_path, args)
+    assert client.status == "terminated"
+    recorded = json.loads(state_path.read_text())["runs"][0]
+    assert recorded["ended_unix"] >= recorded["started_unix"]
+    assert recorded["allowance"]["billing_basis"] == "authorized_paid_budget"
+    assert recorded["allowance"]["paid_authorization_evidence"] == paid_config["paid_authorization_evidence"]
+    assert recorded["allowance"]["session_ceiling_usd"] == 3.29
+    assert paid_config["credits_verified"] is False
+
+
+def test_paid_authorization_preserves_research_decision_and_hardware_gates(cloud, paid_config, tmp_path):
+    with pytest.raises(ValueError, match="measured full/pilot"):
+        cloud.check_allowance(paid_config, {"runs": []}, 1, 3.29, "research")
+    paid_config.update(instance_type="gpu_1x_h100_sxm5", region="us-south-2")
+    client = FakeLambda(paid_config)
+    with pytest.raises(ValueError, match="Alternate hardware is canary-only"):
+        cloud.run_session(
+            client, paid_config, {"runs": []}, tmp_path / "state.json", SimpleNamespace(stage="qualification")
+        )
+    assert client.calls == []
+
+
+def test_paid_prepare_checks_phase_reserve_before_creating_resources(cloud, paid_config, tmp_path):
+    paid_config["qualification_noncompute_reserve_usd"] = 100
+    client = FakeLambda(paid_config)
+    with pytest.raises(ValueError, match="phase allowance"):
+        cloud.prepare(client, paid_config, {"resources": {}, "runs": []}, tmp_path / "state.json")
+    assert not Path(paid_config["ssh_key_path"]).exists()
+    assert [method for method, _, _ in client.calls] == ["GET"]
+
+
+def test_paid_prepare_can_use_existing_resources_without_a_canary_only_allowance(cloud, paid_config, tmp_path):
+    key = Path(paid_config["ssh_key_path"])
+    key.write_text("fixture key")
+    key.with_suffix(".pub").write_text("ssh-ed25519 fixture")
+    state = {"runs": [], "resources": {"ssh_key_id": "key", "filesystem_id": "fs"}}
+    client = FakeLambda(paid_config)
+    cloud.prepare(client, paid_config, state, tmp_path / "state.json")
+    assert [method for method, _, _ in client.calls] == ["GET"]
+    assert paid_config["credits_verified"] is False
 
 
 @pytest.fixture

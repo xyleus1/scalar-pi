@@ -2,13 +2,34 @@
 
 This example runs the LIBERO benchmark: https://github.com/Lifelong-Robot-Learning/LIBERO
 
-Note: When updating requirements.txt in this directory, there is an additional flag `--extra-index-url https://download.pytorch.org/whl/cu113` that must be added to the `uv pip compile` command.
-
 This example requires git submodules to be initialized. Don't forget to run:
 
 ```bash
 git submodule update --init --recursive
 ```
+
+The Python 3.8 simulator uses `requirements.lock.txt`, which includes the dependencies
+of this example, the pinned LIBERO submodule, and `openpi-client`. Syncing the three
+input files directly omits transitive dependencies. The Docker build checks the
+installed dependency graph and imports the dependency modules without starting a
+simulator or GPU workload.
+
+To regenerate the lock from the repository root, keep the existing direct pins and
+CUDA 11.3 index:
+
+```bash
+uvx --from uv==0.5.1 uv pip compile \
+    examples/libero/requirements.txt third_party/libero/requirements.txt \
+    packages/openpi-client/pyproject.toml --python-version 3.8 \
+    --build-constraint examples/libero/requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu113 \
+    --index-strategy=unsafe-best-match -o examples/libero/requirements.lock.txt
+```
+
+The build constraint retains the existing `setuptools==75.3.0` pin in isolated
+source-package builds, including `pathtools`. The image installs CMake for the
+native `egl-probe` build. The LIBERO input is from submodule
+commit `f78abd68ee283de9f9be3c8f7e2a9ad60246e95c`.
 
 ## With Docker (recommended)
 
@@ -42,9 +63,9 @@ Terminal window 1:
 # Create virtual environment
 uv venv --python 3.8 examples/libero/.venv
 source examples/libero/.venv/bin/activate
-uv pip sync examples/libero/requirements.txt third_party/libero/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu113 --index-strategy=unsafe-best-match
-uv pip install -e packages/openpi-client
-uv pip install -e third_party/libero
+uv pip sync examples/libero/requirements.lock.txt --build-constraint examples/libero/requirements.lock.txt --extra-index-url https://download.pytorch.org/whl/cu113 --index-strategy=unsafe-best-match
+uv pip install --no-deps -e packages/openpi-client -e third_party/libero
+uv pip check
 export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 
 # Run the simulation
