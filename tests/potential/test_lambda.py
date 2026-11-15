@@ -207,6 +207,10 @@ def test_completed_session_receiver_preserves_script_and_cleanup(cloud, config, 
     assert "LAMBDA_API_KEY" not in calls[0][1]["env"]
     assert b"fixture-secret" not in stdin.payload
     ssh = next(argv for argv, _ in calls if argv[0] == "ssh" and argv[-1].startswith("bash -c "))
+    for option in ("ServerAliveInterval=30", "ServerAliveCountMax=3"):
+        assert ssh[ssh.index(option) - 1] == "-o"
+    readiness = next(argv for argv, _ in calls if argv[0] == "ssh" and argv[-1] == "true")
+    assert readiness[1:-2] == ssh[1:-2]
     transfer = next(argv for argv, _ in calls if argv[0] == "scp")
     assert transfer[:2] == ["scp", "-r"]
     assert transfer[2:-2] == ssh[1:-2]
