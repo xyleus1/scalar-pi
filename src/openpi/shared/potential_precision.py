@@ -6,6 +6,8 @@ trainable expert and all other floating tensors stay FP32. These pure helpers
 let model construction and header-only checkpoint validation use one policy.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -42,7 +44,7 @@ def checkpoint_float_dtype(name: str) -> str:
     if not isinstance(name, str) or not name:
         raise ValueError("Checkpoint tensor name must be a nonempty string")
     if name.startswith(VLM_PREFIX):
-        relative = name.removeprefix(VLM_PREFIX)
+        relative = name[len(VLM_PREFIX) :]
         if not any(selector in relative for selector in VLM_FP32_SELECTORS):
             return "BF16"
     return "F32"

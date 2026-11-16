@@ -1,5 +1,6 @@
 """Header-only hybrid precision checks; no Torch/JAX/model allocation required."""
 
+import ast
 import json
 from pathlib import Path
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import pytest
 
 from openpi.shared import potential_checkpoint
+from openpi.shared import potential_precision
 from openpi.shared.potential_precision import FP32_BRIDGE_PRECISION
 from openpi.shared.potential_precision import RESEARCH_PRECISION
 from openpi.shared.potential_precision import VLM_FP32_SELECTORS
@@ -194,3 +196,17 @@ def test_metadata_imports_remain_cpu_stdlib_only():
         "assert not any(n.split('.')[0] in {'torch','jax','transformers'} for n in sys.modules)"
     )
     subprocess.run([sys.executable, "-I", "-c", code, str(source)], check=True, timeout=15)
+
+
+def test_precision_dependency_keeps_python38_simulator_compatibility():
+    # The simulator uses Python 3.8; no 3.8 interpreter is required for this
+    # syntax/annotation check. Actual simulator imports remain an image gate.
+    ast.parse(Path(potential_precision.__file__).read_text(), feature_version=(3, 8))
+    assert isinstance(validate_research_tensor_dtypes.__annotations__["header"], str)
+
+    class Python38String(str):
+        def removeprefix(self, prefix):
+            raise AssertionError("str.removeprefix is unavailable in Python 3.8")
+
+    assert checkpoint_float_dtype(Python38String(VLM + "language_model.layers.0.self_attn.q_proj.weight")) == "BF16"
+    assert checkpoint_float_dtype(Python38String(VLM + "language_model.norm.weight")) == "F32"
