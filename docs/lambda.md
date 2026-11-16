@@ -13,6 +13,15 @@ and cost evidence. The complete study has three seeds
 and 40,000 evaluation episodes. Its fallback has seed 42 and 16,000 episodes;
 both retain all tasks and 30,000 updates per arm. If neither fits, stop.
 
+When the user separately authorizes completion of the full study beyond the
+default monetary limit, record `full_study_authorized=true` and a nonempty
+`full_study_authorization_evidence` reference in the private configuration.
+Explicit finite planning allocations may then exceed $2,000. This policy requires
+the measured decision to select `full`; a pilot cannot satisfy it. Accounting,
+qualification, source binding, fixed lease deadlines and cleanup remain required.
+Set the full-study planning allocation from measured costs before admitting its
+training matrix; do not change the scientific protocol to fit the old ceiling.
+
 ## What runs where
 
 | Component | Implementation |

@@ -130,7 +130,8 @@ def validate_config(config):
         raise ValueError("filesystem_name must identify a scalar-pi project filesystem")
     for key in ("budget_usd", "qualification_budget_usd", "max_hourly_rate_usd"):
         finite_positive(config[key], key)
-    if config["budget_usd"] > 2000:
+    full_study = full_study_authorization(config)
+    if config["budget_usd"] > 2000 and not full_study:
         raise ValueError("This study is authorized for a $2,000 total project budget")
     if config["qualification_budget_usd"] > config["budget_usd"]:
         raise ValueError("Qualification allocation cannot exceed the total project budget")
@@ -149,6 +150,19 @@ def validate_config(config):
         raise ValueError("Forecast rate must cover the maximum permitted live rate")
     if "canary_allowance_usd" in config or "canary_noncompute_reserve_usd" in config:
         canary_allowance(config)
+
+
+def full_study_authorization(config):
+    """Allow a separately authorized full study within explicit finite allocations."""
+    authorized = config.get("full_study_authorized", False)
+    if not isinstance(authorized, bool):
+        raise ValueError("full_study_authorized must be a boolean")
+    if not authorized:
+        return {}
+    evidence = config.get("full_study_authorization_evidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise ValueError("Full study authorization requires nonempty full_study_authorization_evidence")
+    return {"full_study_authorized": True, "full_study_authorization_evidence": evidence}
 
 
 def canary_allowance(config):
@@ -219,6 +233,7 @@ def accounted_cost(run):
 
 
 def check_allowance(config, state, hours, rate, stage, budget_report=None):
+    full_study = full_study_authorization(config)
     billing = require_billing(config, stage)
     finite_positive(hours, "max_hours")
     finite_positive(rate, "hourly_rate")
@@ -264,6 +279,8 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
     else:
         if not budget_report or budget_report.get("selected_study") not in {"full", "pilot"}:
             raise ValueError("Research requires a measured full/pilot budget decision")
+        if full_study and budget_report["selected_study"] != "full":
+            raise ValueError("Full study authorization requires selected_study=full; pilot fallback is forbidden")
         if (
             budget_report.get("budget_usd") != config["budget_usd"]
             or budget_report.get("live_hourly_rate_usd", budget_report.get("hourly_rate_usd")) != rate
@@ -280,6 +297,7 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
         "forecast_hourly_rate_usd": forecast_rate,
         "remaining_noncompute_reserve_usd": reserve,
         "with_reserve_usd": forecast,
+        **full_study,
         **billing,
         **phase_cost,
         **canary_cost,

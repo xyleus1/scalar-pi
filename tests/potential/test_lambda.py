@@ -559,6 +559,90 @@ def test_forecast_price_and_storage_are_reserved_without_double_counting(cloud, 
         cloud.check_allowance(config, {"runs": []}, 4, 3.29, "research", report)
 
 
+@pytest.fixture
+def full_study_config(config):
+    return {
+        **config,
+        "full_study_authorized": True,
+        "full_study_authorization_evidence": "fixture: user authorized the complete matched three-seed study",
+        "budget_usd": 5000,
+        "qualification_budget_usd": 500,
+    }
+
+
+@pytest.mark.parametrize("authorized", [None, False])
+def test_legacy_project_cap_remains_without_full_study_authorization(cloud, config, authorized):
+    if authorized is not None:
+        config["full_study_authorized"] = authorized
+    config["budget_usd"] = 2000.01
+    with pytest.raises(ValueError, match=r"\$2,000"):
+        cloud.validate_config(config)
+
+
+@pytest.mark.parametrize("authorized", [None, 1, "true"])
+def test_full_study_authorization_requires_a_boolean(cloud, full_study_config, authorized):
+    full_study_config["full_study_authorized"] = authorized
+    with pytest.raises(ValueError, match="must be a boolean"):
+        cloud.validate_config(full_study_config)
+    with pytest.raises(ValueError, match="must be a boolean"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 1, 3.29, "qualification")
+
+
+@pytest.mark.parametrize("evidence", [None, "", " ", True])
+def test_full_study_authorization_requires_evidence(cloud, full_study_config, evidence):
+    full_study_config["full_study_authorization_evidence"] = evidence
+    with pytest.raises(ValueError, match="full_study_authorization_evidence"):
+        cloud.validate_config(full_study_config)
+    with pytest.raises(ValueError, match="full_study_authorization_evidence"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 1, 3.29, "qualification")
+
+
+def test_full_study_authorization_records_finite_larger_allocation(cloud, full_study_config):
+    cloud.validate_config(full_study_config)
+    report = {
+        "selected_study": "full",
+        "budget_usd": 5000,
+        "live_hourly_rate_usd": 3.29,
+        "forecast_hourly_rate_usd": 3.29,
+        "remaining_compute_cost_with_headroom_usd": 4000,
+    }
+    allowance = cloud.check_allowance(full_study_config, {"runs": []}, 4, 3.29, "research", report)
+    assert allowance["full_study_authorized"] is True
+    assert allowance["full_study_authorization_evidence"] == full_study_config["full_study_authorization_evidence"]
+    assert allowance["with_reserve_usd"] == pytest.approx(100 + 1.2 * 4 * 3.29)
+    report["selected_study"] = "pilot"
+    with pytest.raises(ValueError, match="pilot fallback is forbidden"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 4, 3.29, "research", report)
+    report["selected_study"] = "full"
+    report["remaining_compute_cost_with_headroom_usd"] = 4901
+    with pytest.raises(ValueError, match="remaining balance"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 4, 3.29, "research", report)
+
+
+@pytest.mark.parametrize("field", ["budget_usd", "qualification_budget_usd", "max_hourly_rate_usd"])
+@pytest.mark.parametrize("value", [float("inf"), float("nan"), 0, True])
+def test_full_study_authorization_still_requires_finite_positive_allocations(cloud, full_study_config, field, value):
+    full_study_config[field] = value
+    with pytest.raises(ValueError, match=field):
+        cloud.validate_config(full_study_config)
+
+
+def test_full_study_authorization_preserves_billing_phase_and_time_limits(cloud, full_study_config):
+    full_study_config["credits_verified"] = False
+    with pytest.raises(ValueError, match="paid budget authorization"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 1, 3.29, "qualification")
+    full_study_config["credits_verified"] = True
+    full_study_config["qualification_budget_usd"] = 5001
+    with pytest.raises(ValueError, match="cannot exceed"):
+        cloud.validate_config(full_study_config)
+    full_study_config["qualification_budget_usd"] = 500
+    full_study_config["noncompute_spent_usd"] = 499
+    with pytest.raises(ValueError, match="phase allowance"):
+        cloud.check_allowance(full_study_config, {"runs": []}, 1, 3.29, "qualification")
+    with pytest.raises(ValueError, match="Supervised"):
+        cloud.session_deadline(full_study_config, "research", 4.01, 1000)
+
+
 @pytest.mark.parametrize("authorized", [None, False, 1, "true"])
 def test_paid_qualification_requires_literal_authorization_before_api_calls(cloud, paid_config, tmp_path, authorized):
     if authorized is None:
