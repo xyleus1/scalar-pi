@@ -195,11 +195,11 @@ def test_requires_actual_checkpoint_and_rejects_duplicate_runs(tmp_path):
         choose_study(profile, 4, 2000)
 
 
-def test_bf16_checkpoint_cannot_receive_fp32_completed_work_credit(tmp_path):
+def test_fp32_checkpoint_cannot_receive_hybrid_completed_work_credit(tmp_path):
     record = _checkpoint(tmp_path)
     path = Path(record["checkpoint_dir"]) / "potential_metadata.json"
     metadata = json.loads(path.read_text())
-    metadata["vlm_precision"] = "bfloat16"
+    metadata["vlm_precision"] = "float32"
     path.write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="disagrees with its research checkpoint"):
         choose_study({**_profile(), "completed_training": [record]}, 4, 2000)

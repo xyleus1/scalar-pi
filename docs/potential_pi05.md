@@ -6,6 +6,53 @@ The source baseline is OpenPI commit `215abfb217dbac7d5f1273282331b9b1866c0479`.
 
 The current execution target is Lambda. Follow [the Lambda runbook](lambda.md) for private authentication, pinned containers, staging, qualification, measured full/pilot selection, and user-launched sessions. This is a matched frozen-backbone PyTorch adaptation study, not a reproduction of full-VLM fine-tuning. All research training/profiling requires the verified dataset manifest, staged tokenizer, a clean committed checkout, and the actual `SCALAR_PI_IMAGE_ID`; the Lambda wrapper supplies the image identity automatically.
 
+## Candidate hybrid precision protocol
+
+This isolated source tree prepares `potential_pi_bf16_vlm_fp32_expert_v1`.
+It is not an activation receipt. The prior all-FP32 study remains a separate,
+frozen protocol; its checkpoints, timings and qualification reports cannot be
+relabeled or used to admit this candidate. Comparative training has not begun.
+
+All three arms use BF16 frozen PaliGemma weights except the original FP32 patch
+and position embeddings and layer/final normalization parameters. The entire
+trainable action expert, its projections, time conditioning, optimizer and EMA
+remain FP32 with eager execution and `highest` FP32 matmul precision. Construction
+and original converted base weights remain FP32. Runtime casts and checkpoint
+headers use one exact name-based policy in `potential_precision.py`.
+
+`save_model` and `load_model` are unchanged: raw and EMA safetensors store their
+native mixed dtypes and preserve tied tensors. No temporary whole-model cast is
+introduced. Resume constructs FP32, loads the native mixed raw checkpoint, then
+restores the exact runtime policy before optimizer/EMA/RNG/cursor restoration.
+Marked checkpoints from another precision protocol are rejected. Fresh exact
+CUDA recovery must establish that this sequence preserves the next update.
+
+Qualification has separate numerical questions, each at unchanged
+`atol=rtol=1e-4`:
+
+1. The original FP32 JAX/Torch conversion bridge on the base and released LIBERO
+   checkpoints remains FP32 and is explicitly labeled as such.
+2. `check_hybrid_cache.py` first checks its independent uncached oracle against
+   native all-FP32 joint execution for both checkpoints. Only after both pass
+   does it check hybrid cached execution against the matched hybrid oracle.
+   Each stage uses the same forty audited task observations, velocity at t=0.5,
+   fixed-noise K=1/K=10 trajectories including every intermediate state, and
+   actual sampler endpoints. The oracle never consumes DynamicCache or calls
+   joint attention; each branch has explicit Q/K/V, RoPE, mask and output casts.
+   Hybrid-vs-FP32 drift is descriptive, with no pass threshold.
+3. The complete derivative/cache/frozen-backbone and actual policy-loader tests,
+   selected-batch exact save/resume test, native LIBERO smoke, three complete
+   110-update profiles and rollout calibration must be rerun in the newly
+   committed source and image before training admission.
+
+The earlier cross-precision rejection is retained below. Later isolated probes
+motivated this candidate by separating quantization drift from cache arithmetic;
+they do not replace qualification of this source or the standard cost profiles.
+Dataset, targets, optimizer, schedule, EMA, seeds, 30,000 updates per arm/seed,
+and the full 40,000-episode evaluation are unchanged. A separate `SCALAR_PI_ROOT`
+keeps candidate writable reports/checkpoints/claims apart from the FP32 study;
+only verified immutable inputs may be shared read-only.
+
 ## 1. Architectural graph and scientific intervention
 
 ```text
@@ -64,12 +111,12 @@ The sum is not an average: dividing by 320 would change velocity scale. There is
 | Keep native smooth GELU/SiLU and AdaRMS | Preserves pretrained computation while supporting higher derivatives. No new activation or normalization is introduced. |
 | Keep 32 model channels and horizon 10 | Official LIBERO configuration and checkpoint-compatible per-token projections. Only seven action dimensions are executed. |
 | Preserve native masks, positions, context and time | Prevents unrelated architectural changes from explaining the result. |
-| Frozen FP32 VLM, FP32 expert, eager kernels and `highest` matmul precision | Matched numerical protocol for B0/B1/P training and serving. Chosen after the full-size BF16 drift gate failed; full GPU qualification is still required. |
+| Frozen BF16 VLM with native FP32 embedding/norm exceptions; FP32 expert, eager kernels and `highest` matmul precision | Matched candidate numerical protocol for B0/B1/P. Separate FP32 conversion and matched hybrid oracle checks, followed by fresh GPU qualification, are required. |
 | Architecture metadata in each research checkpoint | Required because direct and potential weight tensors have the same shapes. Loading the wrong interpretation can silently deploy the wrong policy. |
 
 The fixed graph uses the official LIBERO setting `discrete_state_input=False`. For pi0.5 this means numerical proprioception is not fed into the network; its learned conditioning is images and language. The state remains in observation plumbing. Adding state tokens is a separate experiment.
 
-The FP32 fallback was chosen during full-size numerical qualification, before comparative training or evaluation outcomes. The original FP32 JAX/Torch conversion checks passed for direct velocity and K=1/K=10 actions, with a largest absolute discrepancy of `1.71e-5`; all 40 FP32 cached/joint velocity checks also passed. The BF16 frozen-VLM path failed the declared `atol=rtol=2e-2` cross-precision drift check on 3 of 40 observations. That rejected diagnostic remains historical evidence. The deployed FP32 path retains the strict `atol=rtol=1e-4` conversion and cache checks; no tolerance was loosened.
+The FP32 fallback was chosen during full-size numerical qualification, before comparative training or evaluation outcomes. The original FP32 JAX/Torch conversion checks passed for direct velocity and K=1/K=10 actions, with a largest absolute discrepancy of `1.71e-5`; all 40 FP32 cached/joint velocity checks also passed. The BF16 frozen-VLM path failed the declared `atol=rtol=2e-2` cross-precision drift check on 3 of 40 observations. That rejected diagnostic remains historical evidence. That frozen FP32 path retains the strict `atol=rtol=1e-4` conversion and cache checks; no tolerance was loosened.
 
 ## 2. Closest scalar architectures and literature review
 
@@ -80,7 +127,7 @@ The FP32 fallback was chosen during full-size numerical qualification, before co
 | [EnergyFlow released model](https://github.com/sotaagi/EnergyFlow/blob/53cf227026185965f6726f8c8da3ccc6f8477183/model.py) | Mean pooling, spectrally normalized scalar MLP with no final bias, Softplus | Practical training/inference graph handling. The paper says Mish, whereas this code uses Softplus; do not silently merge their descriptions. |
 | [Equilibrium Matching](https://arxiv.org/html/2510.02300v3), Sections 3.2 and 5.3 | Dot-product or negative squared-norm scalar from an existing backbone | Matched-parameter architecture comparison and initialization sensitivity. Explicit scalar variants underperformed its unrestricted field. |
 | [Energy Matching](https://arxiv.org/html/2504.10612v5), Appendix D | U-Net followed by a small ViT producing a time-independent scalar | An alternative architecture; its equilibrium and contrastive objectives are outside this intervention. |
-| [Velociraptor](https://openreview.net/pdf?id=tdIwEN0fCi), Sections 4–5 | Separate scalar adapter to a frozen vector model plus a reweighted residual | Evidence that eliminating nonconservative residuals is not automatically beneficial; report actual compute as well as step count. |
+| [Velociraptor](https://openreview.net/pdf?id=tdIwEN0fCi), Sections 4â€“5 | Separate scalar adapter to a frozen vector model plus a reweighted residual | Evidence that eliminating nonconservative residuals is not automatically beneficial; report actual compute as well as step count. |
 
 The review ledger must record paper version, code commit, actual scalar graph, initialization, objective, solver, tuning policy, seeds, metrics and limitations. Check actual pi modifications such as [GeCO](https://arxiv.org/html/2603.17834v2) and [pi0-EqM](https://arxiv.org/html/2605.23128v1) when positioning novelty: they study time-unconditional fields, not this exact time-conditioned scalar architecture.
 
@@ -127,7 +174,7 @@ Use the reference [pi05_libero training configuration](https://github.com/Physic
 - Global gradient norm clipping at 1.0.
 - 10,000-update linear warmup to `5e-5`, then constant `5e-5`.
 - EMA decay 0.999; predeclared terminal EMA checkpoint.
-- Frozen FP32 VLM and FP32 action expert in all three arms, with eager execution and `highest` matmul precision in training and serving.
+- Frozen BF16 VLM with native FP32 embedding/norm exceptions and FP32 action expert in all three arms, with eager execution and `highest` matmul precision in training and serving.
 - Native tokenizer, image processing, action normalization, horizon 10 and replan horizon 5.
 - Three paired training seeds, with the exact seed values recorded in the run manifest.
 

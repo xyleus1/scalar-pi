@@ -10,15 +10,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from openpi.shared.potential_precision import RESEARCH_PRECISION
+from openpi.shared.potential_precision import validate_research_tensor_dtypes
+
 METADATA_FILENAME = "potential_metadata.json"
 SCHEMA_VERSION = 1
 VELOCITY_MODES = frozenset({"direct", "potential_dot"})
-RESEARCH_PRECISION = {
-    "precision_protocol": "potential_pi_fp32_v1",
-    "vlm_precision": "float32",
-    "expert_precision": "float32",
-    "matmul_precision": "highest",
-}
 
 
 def _weight_metadata(directory: Path, filename: str = "model.safetensors") -> dict[str, str]:
@@ -43,12 +40,7 @@ def _weight_metadata(directory: Path, filename: str = "model.safetensors") -> di
     if not isinstance(metadata, dict):
         raise ValueError(f"Invalid safetensors metadata: {weights}")
     if metadata.get("trainer") == "potential_pi":
-        for name, tensor in header.items():
-            if name == "__metadata__":
-                continue
-            dtype = tensor.get("dtype", "")
-            if dtype.startswith(("F", "BF")) and dtype != "F32":
-                raise ValueError(f"Research weights require FP32 floating tensors: {name} is {dtype}")
+        validate_research_tensor_dtypes(header)
     return metadata
 
 

@@ -13,6 +13,7 @@ from openpi.models_pytorch.gemma_pytorch import PaliGemmaWithExpertModel
 from openpi.models_pytorch.potential import dot_potential
 from openpi.models_pytorch.potential import potential_velocity
 import openpi.models_pytorch.preprocessing_pytorch as _preprocessing
+from openpi.shared.potential_precision import checkpoint_float_dtype
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,11 +159,12 @@ class PI0Pytorch(nn.Module):
             }
         )
 
-    def configure_expert_only(self, vlm_dtype: torch.dtype = torch.float32) -> None:
-        """Configure the FP32 study; explicit BF16 remains available for diagnostics.
+    def configure_expert_only(self, vlm_dtype: torch.dtype = torch.bfloat16) -> None:
+        """Freeze the BF16 VLM and train the FP32 expert, retaining FP32 norms.
 
         Call after loading original FP32 weights. Casting BF16 back to FP32
-        cannot recover the original values and is not a precision migration.
+        cannot recover the original values. Explicit FP32 is only the separate
+        conversion/oracle diagnostic, never a migration of research weights.
         """
         if not self.freeze_vlm:
             raise ValueError("configure_expert_only requires model.freeze_vlm=True.")
@@ -170,15 +172,9 @@ class PI0Pytorch(nn.Module):
             raise ValueError("The frozen VLM must use float32 or bfloat16.")
         self.requires_grad_(requires_grad=False)
         self.expert_modules().to(dtype=torch.float32).requires_grad_(requires_grad=True)
-        keep_fp32 = (
-            "embeddings.patch_embedding",
-            "embeddings.position_embedding",
-            "input_layernorm",
-            "post_attention_layernorm",
-            "model.norm",
-        )
         for name, parameter in self.paligemma_with_expert.paligemma.named_parameters():
-            dtype = torch.float32 if any(part in name for part in keep_fp32) else vlm_dtype
+            full_name = f"paligemma_with_expert.paligemma.{name}"
+            dtype = torch.float32 if checkpoint_float_dtype(full_name) == "F32" else vlm_dtype
             parameter.data = parameter.data.to(dtype=dtype)
         self.paligemma_with_expert.paligemma.eval()
         # Native HF checkpointing may strip past_key_value. Research checkpointing
@@ -186,6 +182,13 @@ class PI0Pytorch(nn.Module):
         self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = False
         self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = False
         self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = False
+
+    def validate_research_precision(self) -> None:
+        """Check actual runtime weights against the checkpoint's same dtype policy."""
+        for name, parameter in self.named_parameters():
+            expected = torch.bfloat16 if checkpoint_float_dtype(name) == "BF16" else torch.float32
+            if parameter.is_floating_point() and parameter.dtype != expected:
+                raise ValueError(f"Research parameter {name} has {parameter.dtype}; expected {expected}")
 
     def zero_action_output(self) -> None:
         """Reset only the output projection, once on fresh B1/P initialization."""

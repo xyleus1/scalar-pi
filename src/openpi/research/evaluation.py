@@ -432,7 +432,7 @@ def validate_provenance(record: dict[str, Any]) -> dict:
     if not record.get("reference", False) and any(
         metadata.get(key) != value for key, value in RESEARCH_PRECISION.items()
     ):
-        raise ValueError("Research serving must use the current FP32 research precision protocol")
+        raise ValueError("Research serving must use the current hybrid research precision protocol")
     if not provenance.get("container_image") or not metadata.get("runtime", {}).get("container_image"):
         raise ValueError("Record both model and simulator container identities")
     source = provenance.get("source", {})
@@ -585,7 +585,7 @@ def validate_results(
                 if not signature:
                     raise ValueError("Missing actual training protocol signature")
                 if any(signature.get(key) != value for key, value in RESEARCH_PRECISION.items()):
-                    raise ValueError("Training signature differs from the current FP32 research precision protocol")
+                    raise ValueError("Training signature differs from the current hybrid research precision protocol")
                 training["protocol"] = {
                     name: value for name, value in signature.items() if name not in {"config", "seed", "initialization"}
                 }

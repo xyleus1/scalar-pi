@@ -156,19 +156,19 @@ def test_research_sidecar_requires_embedded_architecture_metadata(tmp_path):
 
 @pytest.mark.parametrize(
     "change",
-    ["bf16_metadata", "missing_protocol", "bf16_header", "rounded_tensor", "rounded_raw", "missing_raw_protocol"],
+    ["fp32_metadata", "missing_protocol", "fp32_header", "rounded_tensor", "rounded_raw", "missing_raw_protocol"],
 )
 def test_research_checkpoint_precision_cannot_be_relabelled(tmp_path, change):
     expected = {"velocity_mode": "direct", "action_horizon": 10, "action_dim": 32}
     metadata = {"schema_version": 1, "trainer": "potential_pi", **expected, **RESEARCH_PRECISION}
     embedded = {key: str(value) for key, value in metadata.items()}
     weights = torch.tensor([0.1234567], dtype=torch.float32)
-    if change == "bf16_metadata":
-        metadata["vlm_precision"] = "bfloat16"
+    if change == "fp32_metadata":
+        metadata["vlm_precision"] = "float32"
     elif change == "missing_protocol":
         del metadata["precision_protocol"]
-    elif change == "bf16_header":
-        embedded["vlm_precision"] = "bfloat16"
+    elif change == "fp32_header":
+        embedded["vlm_precision"] = "float32"
     elif change == "rounded_tensor":
         weights = weights.bfloat16()
     safetensors.torch.save_file({"backbone.weight": weights}, tmp_path / "model.safetensors", metadata=embedded)
@@ -181,7 +181,7 @@ def test_research_checkpoint_precision_cannot_be_relabelled(tmp_path, change):
         safetensors.torch.save_file({"backbone.weight": raw_weights}, raw_path, metadata=raw_header)
         metadata["raw_model_sha256"] = sha256_file(raw_path)
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
-    with pytest.raises(ValueError, match="precision|FP32|float32"):
+    with pytest.raises(ValueError, match=r"precision|FP32|float32"):
         validate_checkpoint_metadata(tmp_path, **expected)
 
 

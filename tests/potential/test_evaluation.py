@@ -816,7 +816,7 @@ def test_provenance_binds_episode_server_metadata(field):
 
 
 @pytest.mark.parametrize("location", ["serving", "checkpoint", "resume"])
-def test_evaluation_rejects_bf16_even_with_internally_consistent_provenance(location):
+def test_evaluation_rejects_fp32_even_with_internally_consistent_provenance(location):
     manifest = _manifest()
     manifest["require_provenance"] = True
     rows = _records(manifest)
@@ -827,7 +827,7 @@ def test_evaluation_rejects_bf16_even_with_internally_consistent_provenance(loca
         "checkpoint": metadata["research"],
         "resume": metadata["research"]["resume_signature"],
     }[location]
-    target["vlm_precision"] = "bfloat16"
+    target["vlm_precision"] = "float32"
     changed["_provenance"]["server_metadata"] = copy.deepcopy(metadata)
     changed["provenance_sha256"] = ev.content_digest(changed["_provenance"])
     with pytest.raises(ValueError, match="precision"):

@@ -20,17 +20,23 @@ from scripts import qualify_potential_recovery as recovery
 
 def passing_receipt():
     return {
-        "identity": {"base_checkpoint_sha256": "a" * 64, "precision_protocol": "potential_pi_fp32_v1"},
+        "identity": {
+            "base_checkpoint_sha256": "a" * 64,
+            "precision_protocol": RESEARCH_PRECISION["precision_protocol"],
+        },
         "correctness_checks_passed": True,
         "measured_gpu": True,
         "precision": dict(RESEARCH_PRECISION),
         "math_only": False,
         "actual_policy_serving": {"passed": True},
         "conversion_parity": {"passed": True},
+        "hybrid_cache_parity": {"passed": True},
     }
 
 
-@pytest.mark.parametrize("change", [None, "identity", "failed", "cpu", "precision", "math_only", "serving", "parity"])
+@pytest.mark.parametrize(
+    "change", [None, "identity", "failed", "cpu", "precision", "math_only", "serving", "parity", "hybrid"]
+)
 def test_full_qualification_rejects_stale_or_incomplete_receipts(tmp_path, monkeypatch, change):
     report = passing_receipt()
     monkeypatch.setattr(qualification, "execution_identity", lambda **kwargs: passing_receipt()["identity"])
@@ -42,8 +48,10 @@ def test_full_qualification_rejects_stale_or_incomplete_receipts(tmp_path, monke
         report["precision"]["matmul_precision"] = "high"
     elif change == "math_only":
         report["math_only"] = True
-    elif change in ("serving", "parity"):
-        report["actual_policy_serving" if change == "serving" else "conversion_parity"]["passed"] = False
+    elif change in ("serving", "parity", "hybrid"):
+        report[
+            {"serving": "actual_policy_serving", "parity": "conversion_parity", "hybrid": "hybrid_cache_parity"}[change]
+        ]["passed"] = False
     path = tmp_path / "qualification.json"
     path.write_text(json.dumps(report))
     if change is None:
@@ -61,7 +69,7 @@ def test_qualification_rejects_stale_or_missing_runtime_precision(tmp_path, monk
     if missing:
         del report["precision"][field]
     else:
-        report["precision"][field] = "bfloat16"
+        report["precision"][field] = "stale"
     path = tmp_path / "qualification.json"
     path.write_text(json.dumps(report))
     with pytest.raises(ValueError, match="precision"):

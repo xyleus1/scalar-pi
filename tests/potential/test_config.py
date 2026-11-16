@@ -84,7 +84,7 @@ def test_serving_rejects_old_research_precision_before_model_allocation(tmp_path
     if missing:
         del metadata["precision_protocol"]
     else:
-        metadata["vlm_precision"] = "bfloat16"
+        metadata["vlm_precision"] = "float32"
     safetensors.torch.save_file(
         {"fixture": torch.ones(1)},
         tmp_path / "model.safetensors",

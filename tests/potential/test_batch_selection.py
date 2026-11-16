@@ -181,7 +181,7 @@ def test_help_works_in_a_clean_python_process():
 
 
 @pytest.mark.parametrize(
-    "change", [None, "weights", "manifest", "source", "commit", "dirty", "image", "norms", "bf16", "missing_precision"]
+    "change", [None, "weights", "manifest", "source", "commit", "dirty", "image", "norms", "stale_precision", "missing_precision"]
 )
 def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, monkeypatch, change):
     module, args = load_script(), arguments(tmp_path)
@@ -211,8 +211,8 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
             "source_snapshot_sha256": hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest(),
         },
     }
-    if change == "bf16":
-        report["vlm_precision"] = "bfloat16"
+    if change == "stale_precision":
+        report["vlm_precision"] = "float32"
     elif change == "missing_precision":
         report.pop("precision_protocol")
     args.output.write_text(json.dumps(report))
@@ -241,13 +241,13 @@ def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, m
 
 
 @pytest.mark.parametrize(
-    "change", [None, "measurements", "manifest", "weights", "config", "recovery", "incomplete", "bf16"]
+    "change", [None, "measurements", "manifest", "weights", "config", "recovery", "incomplete", "stale_precision"]
 )
 def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, monkeypatch, change):
     module, args = load_script(), arguments(tmp_path)
     args.config = "pi05_libero_b0"
     identity = {
-        "precision_protocol": "potential_pi_fp32_v1",
+        "precision_protocol": RESEARCH_PRECISION["precision_protocol"],
         "base_checkpoint_sha256": module.digest(args.weights / "model.safetensors"),
         "base_conversion_sha256": module.digest(args.weights / "config.json"),
         "container_image_id": "sha256:fixture",
@@ -362,8 +362,8 @@ def test_profile_reuse_follows_retained_evidence_from_a_copied_report(tmp_path, 
     args.verify_profile = tmp_path / "canonical-profile-copy.json"
     if change == "incomplete":
         profile["timed_optimizer_updates"] = 99
-    elif change == "bf16":
-        profile["vlm_precision"] = "bfloat16"
+    elif change == "stale_precision":
+        profile["vlm_precision"] = "float32"
     args.verify_profile.write_text(json.dumps(profile))
     changed_paths = {
         "measurements": metrics,

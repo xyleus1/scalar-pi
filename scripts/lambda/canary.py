@@ -45,6 +45,39 @@ def validate_mount(root, mounts):
     return mount
 
 
+def verify_project(root, storage_root, boot_id):
+    """Verify one study directory against the retained physical filesystem."""
+    root, storage_root = Path(root), Path(storage_root)
+    for path in (root, storage_root):
+        if not path.is_absolute() or not path.is_dir() or path.resolve() != path or path.is_symlink():
+            raise ValueError("Study and storage roots must be existing canonical directories")
+    if not root.is_relative_to(storage_root):
+        raise ValueError("Study root must remain inside the physical storage root")
+    mount = validate_mount(
+        storage_root,
+        json.loads(
+            command("findmnt", "--json", "--mountpoint", str(storage_root), "--output", "TARGET,SOURCE,FSTYPE,OPTIONS")
+        )["filesystems"],
+    )
+    actual = json.loads(
+        command("findmnt", "--json", "--target", str(root), "--output", "TARGET,SOURCE,FSTYPE,OPTIONS")
+    )["filesystems"]
+    identity = ("target", "source", "fstype")
+    if len(actual) != 1 or any(actual[0].get(key) != mount[key] for key in identity):
+        raise ValueError("Study root does not resolve to the verified physical filesystem")
+    retained = verify_retained(storage_root, boot_id)
+    receipt = json.loads(Path(retained["receipt"]).read_text())
+    original = validate_mount(storage_root, receipt["filesystem_mounts"])
+    if any(original.get(key) != mount[key] for key in identity):
+        raise ValueError("Actual storage differs from the retained persistence receipt")
+    return {
+        **retained,
+        "study_root": str(root),
+        "storage_root": str(storage_root),
+        "filesystem": {key: mount[key] for key in identity},
+    }
+
+
 def probe(root, destination, boot_id):
     report = {"schema_version": 1, "passed": False, "started_unix": time.time(), "boot_id": boot_id}
     try:
@@ -94,12 +127,15 @@ def probe(root, destination, boot_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("probe", "verify"))
-    parser.add_argument("--root", type=Path, default=Path("/lambda/nfs/scalar-pi"))
+    parser.add_argument("--root", type=Path, default=Path(os.environ.get("SCALAR_PI_ROOT", "/lambda/nfs/scalar-pi")))
+    parser.add_argument(
+        "--storage-root", type=Path, default=Path(os.environ.get("SCALAR_PI_STORAGE_ROOT", "/lambda/nfs/scalar-pi"))
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     if args.action == "verify":
-        print(json.dumps(verify_retained(args.root, boot_id)))
+        print(json.dumps(verify_project(args.root, args.storage_root, boot_id)))
         return 0
     if args.report is None or args.report.exists():
         parser.error("probe requires a new --report path")

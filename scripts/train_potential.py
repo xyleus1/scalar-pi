@@ -303,7 +303,8 @@ def main(argv=None):
             )
         base_conversion = validate_base_conversion(source, require_receipt=True)
     safetensors.torch.load_model(model, weight_file, strict=True)
-    model.configure_expert_only(vlm_dtype=torch.float32)
+    model.configure_expert_only()
+    model.validate_research_precision()
     if args.resume is None and config.model.initialization == "zero_output":
         model.zero_action_output()
     model.to(device)

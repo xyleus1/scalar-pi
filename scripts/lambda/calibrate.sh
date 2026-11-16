@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Complete native timing diagnostics; retain one exact spec across bounded sessions.
 set -euo pipefail
-root=/lambda/nfs/scalar-pi
+root="${SCALAR_PI_ROOT:-/lambda/nfs/scalar-pi}"
+export SCALAR_PI_ROOT="$root"
 reports="$root/data/experiments/reports"
 : "${SCALAR_PI_ATTEMPT:?Launch this phase through the Lambda controller}"
 : "${SCALAR_PI_DEADLINE_UNIX:?The controller supplies the absolute deadline}"

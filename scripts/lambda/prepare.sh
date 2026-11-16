@@ -4,7 +4,9 @@ set -euo pipefail
 runner=(bash scripts/lambda/run.sh)
 stage=(python scripts/lambda/staging.py run)
 attempt="${SCALAR_PI_ATTEMPT:?Launch this phase through the Lambda controller}"
-host=/lambda/nfs/scalar-pi/data
+root="${SCALAR_PI_ROOT:-/lambda/nfs/scalar-pi}"
+export SCALAR_PI_ROOT="$root"
+host="$root/data"
 receipts=/data/experiments/reports/staging
 "${runner[@]}" build --execute
 

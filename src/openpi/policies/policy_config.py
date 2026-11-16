@@ -136,9 +136,8 @@ def create_trained_policy(
         if getattr(train_config.model, "freeze_vlm", False):
             import torch
 
-            model.configure_expert_only(vlm_dtype=torch.float32)
-            if any(parameter.dtype != torch.float32 for parameter in model.parameters()):
-                raise ValueError("Research serving requires FP32 VLM and expert parameters")
+            model.configure_expert_only()
+            model.validate_research_precision()
             # The constructor sets "high". Research serving must match the
             # "highest" arithmetic qualified and used by the matched trainer.
             torch.set_float32_matmul_precision("highest")

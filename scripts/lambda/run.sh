@@ -7,6 +7,8 @@ execute=false
 if [[ "${1:-}" == --execute ]]; then execute=true; shift; fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 root="${SCALAR_PI_ROOT:-/lambda/nfs/scalar-pi}"
+storage_root="${SCALAR_PI_STORAGE_ROOT:-/lambda/nfs/scalar-pi}"
+export SCALAR_PI_ROOT="$root" SCALAR_PI_STORAGE_ROOT="$storage_root"
 data="$root/data"
 commit="$(git -C "$repo" rev-parse HEAD)"
 model="scalar-pi-model:$commit"
@@ -26,7 +28,7 @@ fi
 [[ -z "$(git -C "$repo" status --porcelain)" ]] || { echo 'Commit source changes before execution.' >&2; exit 1; }
 mkdir -p "$data/experiments" "$root/images"
 cd "$repo"
-python3 scripts/lambda/canary.py verify --root "$root"
+python3 scripts/lambda/canary.py verify --root "$root" --storage-root "$storage_root"
 archive="$root/images/$commit.tar.gz"
 receipt="$root/images/$commit.images.json"
 archive_verified=false
@@ -90,6 +92,7 @@ common=(run --rm --init -i --gpus all --network host --stop-timeout 120
     -e GIT_CONFIG_KEY_1=safe.directory -e GIT_CONFIG_VALUE_1=/app/third_party/libero
     -e "SCALAR_PI_IMAGE_ID=$model_id" -e "SCALAR_PI_MODEL_IMAGE=$model_id"
     -e "SCALAR_PI_SIMULATOR_IMAGE=$simulator_id"
+    -e "SCALAR_PI_ROOT=$root" -e "SCALAR_PI_STORAGE_ROOT=$storage_root"
     -e "SCALAR_PI_DEADLINE_UNIX=${SCALAR_PI_DEADLINE_UNIX:-}"
     -e "SCALAR_PI_ATTEMPT=${SCALAR_PI_ATTEMPT:-}"
     -e "SCALAR_PI_HOURLY_RATE_USD=${SCALAR_PI_HOURLY_RATE_USD:-}"

@@ -89,7 +89,7 @@ def prepare(root, *, attempt, smoke_manifest=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("/lambda/nfs/scalar-pi"))
+    parser.add_argument("--root", type=Path, default=Path(os.environ.get("SCALAR_PI_ROOT", "/lambda/nfs/scalar-pi")))
     parser.add_argument("--smoke-manifest", type=Path)
     args = parser.parse_args(argv)
     prepare(args.root, attempt=os.environ["SCALAR_PI_ATTEMPT"], smoke_manifest=args.smoke_manifest)

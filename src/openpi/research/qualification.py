@@ -44,11 +44,12 @@ def verify_qualification(path, *, checkpoint=None, base_hash=None, conversion_ha
     if report.get("correctness_checks_passed") is not True or report.get("measured_gpu") is not True:
         raise ValueError("A passing full-size CUDA qualification is required")
     if report.get("precision") != RESEARCH_PRECISION:
-        raise ValueError("Qualification requires the current FP32 research precision protocol")
+        raise ValueError("Qualification requires the current hybrid research precision protocol")
     if require_serving and (
         report.get("math_only") is not False
         or report.get("actual_policy_serving", {}).get("passed") is not True
         or report.get("conversion_parity", {}).get("passed") is not True
+        or report.get("hybrid_cache_parity", {}).get("passed") is not True
     ):
         raise ValueError("Full corpus serving and conversion qualification are required")
     return report

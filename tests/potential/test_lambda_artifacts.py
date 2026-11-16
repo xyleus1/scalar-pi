@@ -126,7 +126,7 @@ def test_exact_terminal_run_can_be_reused(verifier, tmp_path, config):
         ("data_manifest_sha256", "1" * 64),
         ("normalization_hash", "1" * 64),
         ("matmul_precision", "high"),
-        ("vlm_precision", "bfloat16"),
+        ("vlm_precision", "float32"),
         ("expert_precision", "bfloat16"),
         ("precision_protocol", "stale"),
     ],
@@ -150,7 +150,7 @@ def test_changed_training_protocol_is_rejected(verifier, tmp_path, field):
         "microbatch_size": 8,
         "gradient_checkpointing": True,
         "config": "pi05_libero_b1",
-        "vlm_precision": "bfloat16",
+        "vlm_precision": "float32",
     }[field]
     path.write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match=field):

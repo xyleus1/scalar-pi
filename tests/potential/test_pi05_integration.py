@@ -80,6 +80,7 @@ def tiny_model(monkeypatch):
 
 def test_actual_expert_double_backward_and_frozen_vlm(tiny_model):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.train()
     actions = torch.randn(2, 3, 4)
     loss = model(observation, actions, noise=torch.randn_like(actions), time=torch.tensor([0.3, 0.7])).mean()
@@ -93,13 +94,13 @@ def test_actual_expert_double_backward_and_frozen_vlm(tiny_model):
 
 
 @pytest.mark.parametrize("arm", ["B0", "B1", "P"])
-def test_matched_arms_update_only_fp32_expert_and_preserve_fp32_vlm(tiny_model, arm):
+def test_matched_arms_update_only_fp32_expert_and_preserve_hybrid_vlm(tiny_model, arm):
     model, observation = tiny_model
     model.velocity_mode = "potential_dot" if arm == "P" else "direct"
     model.configure_expert_only()
     if arm != "B0":
         model.zero_action_output()
-    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
+    model.validate_research_precision()
     backbone = model.paligemma_with_expert.paligemma
     before = {name: parameter.detach().clone() for name, parameter in backbone.named_parameters()}
     head_before = model.action_out_proj.weight.detach().clone()
@@ -133,6 +134,7 @@ def test_bfloat16_frozen_vlm_and_float32_expert_support_double_backward(tiny_mod
 
 def test_native_cache_is_immutable_and_conditioning_is_used(tiny_model):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.eval()
     context = model.encode_context(observation)
     cache_before = [(key.clone(), value.clone()) for key, value in context.past_key_values]
@@ -157,6 +159,7 @@ def test_native_cache_is_immutable_and_conditioning_is_used(tiny_model):
 
 def test_checkpointed_suffix_preserves_output_and_parameter_gradients(tiny_model):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.train()
     actions = torch.randn(2, 3, 4)
     noise = torch.randn_like(actions)
@@ -176,6 +179,7 @@ def test_checkpointed_suffix_preserves_output_and_parameter_gradients(tiny_model
 
 def test_sampling_restores_local_gradients_without_parameter_gradients(tiny_model):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.eval()
     noise = torch.randn(2, 3, 4)
     with torch.no_grad():
@@ -206,6 +210,7 @@ def test_joint_vector_path_matches_cached_vector_path(tiny_model):
 
 def test_zero_head_controls_match_and_begin_learning(tiny_model):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.zero_action_output()
     context = model.encode_context(observation)
     x = torch.randn(2, 3, 4, requires_grad=True)
@@ -283,9 +288,10 @@ def test_actual_policy_loader_sets_research_precision_and_retains_input_gradient
     policy = policy_config.create_trained_policy(config, tmp_path, norm_stats=norms, pytorch_device="cpu")
     assert torch.get_float32_matmul_precision() == "highest"
     assert policy.metadata["matmul_precision"] == "highest"
-    assert policy.metadata["vlm_precision"] == policy.metadata["expert_precision"] == "float32"
-    assert policy.metadata["precision_protocol"] == "potential_pi_fp32_v1"
-    assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
+    assert policy.metadata["vlm_precision"] == "bfloat16"
+    assert policy.metadata["expert_precision"] == "float32"
+    assert policy.metadata["precision_protocol"] == RESEARCH_PRECISION["precision_protocol"]
+    model.validate_research_precision()
     assert policy.metadata["checkpoint_sha256"] == hashlib.sha256(b"fixture weights loaded by stub").hexdigest()
     assert len(policy.metadata["normalization_sha256"]) == 64
     result = policy.infer(
@@ -311,6 +317,7 @@ def test_actual_policy_loader_sets_research_precision_and_retains_input_gradient
 @pytest.mark.parametrize("mode", ["direct", "potential_dot"])
 def test_zero_head_update_activates_trunk_gradients(tiny_model, mode):
     model, observation = tiny_model
+    model.configure_expert_only()
     model.velocity_mode = mode
     model.zero_action_output()
     context = model.encode_context(observation)

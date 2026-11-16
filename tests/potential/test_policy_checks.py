@@ -8,7 +8,7 @@ from openpi.research.policy_checks import input_digest
 from openpi.research.policy_checks import load_corpus
 from openpi.research.policy_checks import require_staged_tokenizer
 from openpi.research.policy_checks import timing_summary
-from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
+from openpi.shared.potential_precision import FP32_BRIDGE_PRECISION
 from scripts.benchmark_potential import measure_calls
 from scripts.check_potential_parity import compare_exports
 
@@ -80,7 +80,7 @@ def test_timing_excludes_warmup_reuses_noise_and_separates_executed_throughput()
 def test_parity_comparison_rejects_changed_inputs_and_detects_output_error(tmp_path):
     def write(backend, *, digest="same", delta=0, cache_checks=True):
         metadata = {
-            **RESEARCH_PRECISION,
+            **FP32_BRIDGE_PRECISION,
             "schema_version": 1,
             "backend": backend,
             "precision": "float32",
@@ -119,7 +119,7 @@ def test_parity_comparison_rejects_changed_inputs_and_detects_output_error(tmp_p
 def test_parity_cannot_admit_stale_precision_or_incomplete_corpus(tmp_path, change):
     def export(backend):
         metadata = {
-            **RESEARCH_PRECISION,
+            **FP32_BRIDGE_PRECISION,
             "schema_version": 1,
             "backend": backend,
             "precision": "float32",

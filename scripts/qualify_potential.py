@@ -30,6 +30,9 @@ def parse_args(argv=None):
     parser.add_argument(
         "--parity-report", type=Path, help="Passing base JAX/Torch conversion report for full qualification"
     )
+    parser.add_argument("--hybrid-report", type=Path, help="Passing base/released matched hybrid oracle report")
+    parser.add_argument("--reference-checkpoint", type=Path, help="Original converted released LIBERO weights")
+    parser.add_argument("--reference-norm-stats", type=Path, help="Released LIBERO normalization asset")
     parser.add_argument("--corpus", type=Path, help="Audited real-observation NPZ; required for CUDA qualification")
     parser.add_argument("--norm-stats", type=Path, help="Staged LIBERO norms for base-checkpoint serving qualification")
     parser.add_argument("--report", type=Path, default=Path("data/gpu_qualification.json"))
@@ -98,10 +101,12 @@ def _qualify(args, report):
     from openpi.models import model as model_api
     from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
     from openpi.research.evaluation import file_digest
+    from openpi.research.hybrid_qualification import verify_hybrid_report
     from openpi.research.policy_checks import require_staged_tokenizer
     from openpi.research.qualification import execution_identity
     from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
     from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
+    from openpi.shared.potential_precision import FP32_BRIDGE_PRECISION
     from openpi.training import config as configs
     from openpi.training.potential import validate_base_conversion
 
@@ -137,7 +142,7 @@ def _qualify(args, report):
         if (
             parity.get("passed") is not True
             or parity.get("purpose") != "direct_model_conversion_and_cache_parity"
-            or any(parity.get(key) != value for key, value in RESEARCH_PRECISION.items())
+            or any(parity.get(key) != value for key, value in FP32_BRIDGE_PRECISION.items())
             or parity.get("corpus_observations") != 40
             or parity.get("torch", {}).get("checkpoint_sha256") != report["identity"]["base_checkpoint_sha256"]
             or parity.get("torch", {}).get("corpus_sha256") != file_digest(args.corpus)
@@ -145,6 +150,21 @@ def _qualify(args, report):
         ):
             raise ValueError("Conversion parity receipt differs from current base/corpus/normalization")
         report["conversion_parity"] = {"passed": True, "report_sha256": file_digest(args.parity_report)}
+        if args.hybrid_report is None:
+            raise ValueError("Full base qualification requires --hybrid-report independently of FP32 conversion")
+        if args.reference_checkpoint is None or args.reference_norm_stats is None:
+            raise ValueError(
+                "Full base qualification requires released --reference-checkpoint and --reference-norm-stats"
+            )
+        report["hybrid_cache_parity"] = verify_hybrid_report(
+            args.hybrid_report,
+            identity=report["identity"],
+            corpus_sha256=file_digest(args.corpus),
+            base_normalization_sha256=file_digest(args.norm_stats),
+            reference_checkpoint_sha256=file_digest(args.reference_checkpoint / "model.safetensors"),
+            reference_normalization_sha256=file_digest(args.reference_norm_stats),
+            reference_conversion_sha256=file_digest(args.reference_checkpoint / "config.json"),
+        )
     if args.checkpoint_kind == "base":
         validate_base_conversion(args.checkpoint, require_receipt=True)
         with safe_open(weight_file, framework="pt", device="cpu") as weights:
@@ -159,7 +179,8 @@ def _qualify(args, report):
     torch.backends.cudnn.benchmark = False
     model = PI0Pytorch(config.model)
     safetensors.torch.load_model(model, weight_file, strict=True)
-    model.configure_expert_only(vlm_dtype=torch.float32)
+    model.configure_expert_only()
+    model.validate_research_precision()
     model.to(device)
     torch.set_float32_matmul_precision("highest")
     if args.gradient_checkpointing:
@@ -373,9 +394,9 @@ def _qualify_policy(args, report):
         if (
             any(policy.metadata.get(key) != value for key, value in RESEARCH_PRECISION.items())
             or torch.get_float32_matmul_precision() != "highest"
-            or any(parameter.dtype != torch.float32 for parameter in policy._model.parameters())  # noqa: SLF001
         ):
             raise RuntimeError("Actual serving loader disagrees with qualified arithmetic")
+        policy._model.validate_research_precision()  # noqa: SLF001
         first = None
         for index in range(len(corpus["states"])):
             output = policy.infer(corpus_observation(corpus, index), noise=corpus["noise"][index])
@@ -395,7 +416,7 @@ def _qualify_policy(args, report):
         "passed": True,
         "corpus_sha256": file_digest(args.corpus),
         "num_steps": serving,
-        "scope": "direct base bridge" if args.checkpoint_kind == "base" else "trained potential checkpoint",
+        "scope": "direct base at hybrid research precision" if args.checkpoint_kind == "base" else "trained potential checkpoint",
     }
     report["corpus_sha256"] = file_digest(args.corpus)
     report["normalization_sha256"] = serving["1"]["policy"]["normalization_sha256"]

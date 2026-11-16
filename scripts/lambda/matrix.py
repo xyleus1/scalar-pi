@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -55,7 +56,7 @@ def archive(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("render", "archive"))
-    parser.add_argument("--root", type=Path, default=Path("/lambda/nfs/scalar-pi"))
+    parser.add_argument("--root", type=Path, default=Path(os.environ.get("SCALAR_PI_ROOT", "/lambda/nfs/scalar-pi")))
     parser.add_argument("--study", choices=("full", "pilot"), default="full")
     parser.add_argument("--diagnostic", action="store_true", help="Only four released-policy compatibility episodes")
     parser.add_argument("--attempt", default="default", help="Separate diagnostic attempts; never overwrite evidence")

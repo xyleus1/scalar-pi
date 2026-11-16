@@ -20,31 +20,8 @@ from openpi.research.policy_checks import file_digest
 from openpi.research.policy_checks import input_digest
 from openpi.research.policy_checks import load_corpus
 from openpi.research.policy_checks import require_staged_tokenizer
-from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
-
-
-def torch_joint_velocity(model, observation, actions, time):
-    """Native joint attention path on fixed inference inputs, before scalarization."""
-    import torch
-
-    from openpi.models_pytorch.pi0_pytorch import make_att_2d_masks
-
-    images, image_masks, tokens, token_masks, state = model._preprocess_observation(observation, train=False)  # noqa: SLF001
-    prefix, prefix_masks, prefix_ar = model.embed_prefix(images, image_masks, tokens, token_masks)
-    suffix, suffix_masks, suffix_ar, condition = model.embed_suffix(state, actions, time)
-    if model.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype != torch.float32:
-        raise ValueError("Native joint parity requires the selected all-FP32 runtime")
-    masks = torch.cat((prefix_masks, suffix_masks), dim=1)
-    autoregressive = torch.cat((prefix_ar, suffix_ar), dim=1)
-    (_, output), _ = model.paligemma_with_expert.forward(
-        attention_mask=model._prepare_attention_masks_4d(make_att_2d_masks(masks, autoregressive)),  # noqa: SLF001
-        position_ids=torch.cumsum(masks, dim=1) - 1,
-        past_key_values=None,
-        inputs_embeds=[prefix, suffix],
-        use_cache=False,
-        adarms_cond=[None, condition],
-    )
-    return model.action_out_proj(output[:, -model.config.action_horizon :].float())
+from openpi.research.uncached_reference import torch_joint_velocity
+from openpi.shared.potential_precision import FP32_BRIDGE_PRECISION
 
 
 def jax_joint_velocity(model, observation, actions, time):
@@ -98,7 +75,7 @@ def export_outputs(args):
     result = {"input_sha256": np.asarray([input_digest(inputs) for inputs in transformed])}
     metadata = {
         "schema_version": 1,
-        **RESEARCH_PRECISION,
+        **FP32_BRIDGE_PRECISION,
         "corpus_observations": 40,
         "task_indices": corpus["task_indices"].tolist(),
         "backend": args.backend,
@@ -184,9 +161,9 @@ def compare_exports(jax_path: Path, torch_path: Path) -> dict:
         raise ValueError("Supply JAX reference and Torch conversion exports in that order")
     for metadata in (source, converted):
         if metadata.get("precision") != "float32" or any(
-            metadata.get(key) != value for key, value in RESEARCH_PRECISION.items()
+            metadata.get(key) != value for key, value in FP32_BRIDGE_PRECISION.items()
         ):
-            raise ValueError("Parity requires the current FP32 research precision protocol")
+            raise ValueError("Parity requires the independent FP32 conversion precision protocol")
         if metadata.get("corpus_observations") != 40 or metadata.get("task_indices") != list(range(40)):
             raise ValueError("Parity requires coverage of all forty audited tasks")
     for key in ("schema_version", "precision", "corpus_sha256", "normalization_sha256", "flow_time"):
@@ -213,7 +190,7 @@ def compare_exports(jax_path: Path, torch_path: Path) -> dict:
         raise ValueError("FP32 cache checks require unchanged atol=rtol=1e-4")
     return {
         "schema_version": 1,
-        **RESEARCH_PRECISION,
+        **FP32_BRIDGE_PRECISION,
         "corpus_observations": 40,
         "purpose": "direct_model_conversion_and_cache_parity",
         "passed": all(value.get("passed") is True for value in [*errors.values(), *cache_checks]),
@@ -224,7 +201,7 @@ def compare_exports(jax_path: Path, torch_path: Path) -> dict:
         "conversion_errors": errors,
         "limitations": [
             "Engineering numerical tolerances, not a task-performance guarantee; no scalar model is compared here.",
-            "The matched study deploys FP32 VLM and expert arithmetic; this report does not qualify BF16 execution.",
+            "This FP32 conversion bridge does not qualify the hybrid study; its matched oracle is a separate gate.",
         ],
     }
 

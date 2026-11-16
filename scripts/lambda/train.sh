@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # User-launched, resumable study. Budget selection precedes comparative outcomes.
 set -euo pipefail
-root=/lambda/nfs/scalar-pi
+root="${SCALAR_PI_ROOT:-/lambda/nfs/scalar-pi}"
+export SCALAR_PI_ROOT="$root"
 data="$root/data"
 report="$data/experiments/reports/budget.json"
 study="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("budget",d)["selected_study"])' "$report")"
