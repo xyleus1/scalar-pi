@@ -501,6 +501,15 @@ def test_template_binds_version_retries_secret_and_exact_lease_permissions():
     assert schedule["State"] == "ENABLED"
     assert schedule["Target"]["Arn"] == {"Ref": "CleanupVersion"}
     assert schedule["Target"]["RetryPolicy"]["MaximumEventAgeInSeconds"] == 3600
+    # Avoid CloudFormation's broken GetAtt lookup for a schedule in a custom group.
+    assert template["Outputs"]["ScheduleArn"]["Value"] == {
+        "Fn::Sub": (
+            "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:"
+            "schedule/${ScheduleGroup}/terminate-${LeaseId}"
+        )
+    }
+    assert schedule["Name"] == {"Fn::Sub": "terminate-${LeaseId}"}
+    assert schedule["GroupName"] == {"Ref": "ScheduleGroup"}
     statements = resources["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
     secret = next(value for value in statements if value["Sid"] == "ScopedCleanupCredential")
     assert secret["Action"] == "secretsmanager:GetSecretValue"
