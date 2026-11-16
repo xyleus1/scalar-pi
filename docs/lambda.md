@@ -7,7 +7,9 @@ P versus B1 at K=10 is primary. P versus B0 measures practical benefit. This is
 not a reproduction of full-VLM fine-tuning, and improvement is not assumed.
 
 The project limit is **$2,000**, including preparation and storage. The initial
-preparation/qualification allowance is $100. The complete study has three seeds
+preparation/qualification allocation is $100 by default. It is configurable
+within the authorized project total; reallocations must retain their rationale
+and cost evidence. The complete study has three seeds
 and 40,000 evaluation episodes. Its fallback has seed 42 and 16,000 episodes;
 both retain all tasks and 30,000 updates per arm. If neither fits, stop.
 
@@ -15,7 +17,9 @@ both retain all tasks and 30,000 updates per arm. If neither fits, stop.
 
 | Component | Implementation |
 | --- | --- |
-| Windows control | `scripts/lambda/Invoke-Lambda.ps1`, Python standard-library Lambda API client, OpenSSH |
+| Windows launch client | `scripts/lambda/guarded.py`, Python standard-library Lambda API client, official GitHub CLI |
+| Unattended cleanup | An already-running GitHub-hosted deadline watchdog with a restricted, expiring service key |
+| Worker lifetime | A detached systemd service installed by cloud-init; independent of SSH and workstation sleep |
 | Authentication | Existing private DPAPI key loader; never copied into this repository or the worker |
 | Compute | One x86-64 H100 PCIe 80 GB in `us-west-3` |
 | Storage | Project filesystem `scalar-pi`, attached when the instance is created |
@@ -24,9 +28,47 @@ both retain all tasks and 30,000 updates per arm. If neither fits, stop.
 | Research | Existing training, policy, evaluation, and analysis entrypoints |
 
 The helper defaults to dry runs for every mutating command. You invoke the
-commands with `--execute` when ready. No startup script automatically begins
-training. No GPU, training, or real simulator run was needed to implement this
-tooling.
+commands with `--execute` when ready. The guarded launcher starts only the
+explicitly supplied worker script. Research still requires completed qualification
+and a measured budget decision.
+
+## Unattended execution
+
+Do not use the legacy Windows-owned session controller for unattended work.
+Modern Standby suspends both ordinary processes and scheduled tasks. Guest
+shutdown also does not terminate a Lambda instance's billable allocation.
+
+Before launch, dispatch `.github/workflows/lambda-watchdog.yml` using
+`scripts/lambda/github_guard.py`. Exercise its `--dry-run` handshake first.
+For a live run, the `lambda-cleanup` GitHub environment must restrict deployments
+to `main` and contain `LAMBDA_TERMINATE_API_KEY`: an expiring service key with
+only the workspace's `instance-reader` and `instance-terminate` roles.
+Never upload the personal Lambda key. The provider permission is workspace-wide;
+the watcher additionally matches the exact name, worker commit, region, type,
+run and deadline tags before binding one instance ID.
+
+`wait-ready` and the launch client's final `revalidate` verify the exact workflow
+run, attempt, controller commit, artifact digest, deadline, and running
+`Watch deadline` step. An artifact alone is insufficient. The workflow has a
+fixed five-hour limit, including a twenty-minute termination window and evidence
+reserve; it does not use a scheduled cron trigger.
+
+Supply `guarded.py` a separately audited, short-lived launch key in
+`LAMBDA_LAUNCH_API_KEY`. Lambda's available `workspace-member` launch role grants
+broader workspace permissions; this key stays on the workstation and must expire
+before the armed launch window closes. Its provider expiry prevents a laptop
+from waking much later and submitting an unguarded launch. The private receipt
+records its actual permissions, workspace, identity, expiry and key hash.
+
+The launcher records pending state before one POST and returns after recording
+the instance ID. Cloud-init starts the pinned worker as `ubuntu` through
+`detached.py`; logs and completion evidence live under
+`data/operations/detached/<attempt>/`. The external watcher owns termination at
+the absolute deadline. It remains necessary even when systemd stops the workload.
+Ambiguous launch responses block retries until reconciled. Retain the watchdog's
+result artifact and use its observed termination time when closing the ledger.
+Provider or GitHub outages can still delay cleanup; this mechanism removes the
+workstation-suspension dependency, not every infrastructure failure mode.
 
 ## 1. Private account settings
 
@@ -47,14 +89,14 @@ An existing user authorization to pay for the project can instead be recorded
 with literal `paid_budget_authorized=true` and a nonempty
 `paid_authorization_evidence` reference to the approval and its dollar limits.
 This permits preparation, qualification, and research within the existing
-$2,000 project and $100 qualification ceilings while keeping
+$2,000 project ceiling and configured qualification allocation while keeping
 `credits_verified=false`. Forecasts use the full quoted compute price without
 assuming credits apply. Each launch's allowance records its `billing_basis` and,
 for this paid basis, the authorization evidence reference.
 
 The paid basis also requires an explicit nonnegative
 `qualification_noncompute_reserve_usd` for remaining qualification storage and
-taxes. This reserve counts toward the cumulative $100 qualification allowance,
+taxes. This reserve counts toward the cumulative qualification allocation,
 along with previous canaries, qualification compute, and incurred noncompute
 charges. It is part of the project-wide `noncompute_reserve_usd`; the project
 calculation uses the larger reserve rather than adding them. Paid preparation

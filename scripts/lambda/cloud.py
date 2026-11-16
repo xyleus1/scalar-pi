@@ -130,8 +130,10 @@ def validate_config(config):
         raise ValueError("filesystem_name must identify a scalar-pi project filesystem")
     for key in ("budget_usd", "qualification_budget_usd", "max_hourly_rate_usd"):
         finite_positive(config[key], key)
-    if config["budget_usd"] > 2000 or config["qualification_budget_usd"] > 100:
-        raise ValueError("This study is authorized for $2,000, with $100 for qualification")
+    if config["budget_usd"] > 2000:
+        raise ValueError("This study is authorized for a $2,000 total project budget")
+    if config["qualification_budget_usd"] > config["budget_usd"]:
+        raise ValueError("Qualification allocation cannot exceed the total project budget")
     for key in ("noncompute_spent_usd", "noncompute_reserve_usd"):
         finite_positive(config[key], key, zero=True)
     finite_positive(
@@ -254,7 +256,7 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
             phase_spent + config["noncompute_spent_usd"] + qualification_reserve + 1.2 * hours * forecast_rate
         )
         if phase_forecast > config["qualification_budget_usd"]:
-            raise ValueError("Qualification session exceeds the $100 phase allowance")
+            raise ValueError("Qualification session exceeds the configured phase allowance")
         phase_cost = {
             "qualification_noncompute_reserve_usd": qualification_reserve,
             "qualification_with_reserve_usd": phase_forecast,

@@ -597,6 +597,17 @@ def test_paid_authorization_requires_explicit_finite_qualification_reserve(cloud
         cloud.check_allowance(paid_config, {"runs": []}, 1, 3.29, "qualification")
 
 
+def test_phase_reallocation_preserves_project_ceiling(cloud, paid_config):
+    paid_config["qualification_budget_usd"] = 125
+    cloud.validate_config(paid_config)
+    paid_config["qualification_budget_usd"] = 2001
+    with pytest.raises(ValueError, match="total project budget"):
+        cloud.validate_config(paid_config)
+    paid_config.update(budget_usd=2001, qualification_budget_usd=125)
+    with pytest.raises(ValueError, match="total project budget"):
+        cloud.validate_config(paid_config)
+
+
 def test_paid_qualification_reserves_phase_cost_without_double_counting_project_cost(cloud, paid_config):
     state = {
         "runs": [
