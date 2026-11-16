@@ -7,6 +7,7 @@ No SSH connection, local monitor, or finally block owns instance termination.
 
 import argparse
 import base64
+import copy
 import datetime as dt
 import hashlib
 import hmac
@@ -20,6 +21,7 @@ import cloud
 import detached
 from watchdog import WORKER_COMMIT
 from watchdog import sha256
+from watchdog import validate_instance
 from watchdog import validate_request
 
 USER_DATA_LIMIT = 1_000_000
@@ -116,7 +118,18 @@ def bind_guard(armed, request):
     return deadline
 
 
-def build_body(config, state, armed, script, report_bytes, *, rate, forecast_rate):
+def build_body(
+    config,
+    state,
+    armed,
+    script,
+    report_bytes,
+    *,
+    rate,
+    forecast_rate,
+    existing_checkout=False,
+    normalization_sha256=None,
+):
     deadline = armed["deadline_unix"]
     name = armed["expected"]["instance_name"]
     exports = (
@@ -126,12 +139,29 @@ def build_body(config, state, armed, script, report_bytes, *, rate, forecast_rat
         f"export SCALAR_PI_ATTEMPT={name}\n"
     )
     if report_bytes is not None:
-        encoded = base64.b64encode(report_bytes).decode("ascii")
-        exports += (
-            f"mkdir -p {cloud.REMOTE_ROOT}/data/experiments/reports\n"
-            f"printf '%s' '{encoded}' | base64 --decode > {cloud.REMOTE_ROOT}/data/experiments/reports/budget.json\n"
-        )
-    worker = cloud.remote_script(WORKER_COMMIT, exports + script, with_submodules=True)
+        if existing_checkout:
+            exports += (
+                "python3 - <<'SCALAR_PI_VERIFY_BUDGET'\nimport hashlib\nfrom pathlib import Path\n"
+                f"path = Path({(cloud.REMOTE_ROOT + '/data/experiments/reports/budget.json')!r})\n"
+                "if path.is_symlink() or path.resolve() != path or not path.is_file():\n"
+                "    raise ValueError('Existing study budget must be a regular nonsymlink file')\n"
+                f"if hashlib.sha256(path.read_bytes()).hexdigest() != {hashlib.sha256(report_bytes).hexdigest()!r}:\n"
+                "    raise ValueError('Existing study budget differs from launch admission')\n"
+                "SCALAR_PI_VERIFY_BUDGET\n"
+            )
+        else:
+            encoded = base64.b64encode(report_bytes).decode("ascii")
+            exports += (
+                f"mkdir -p {cloud.REMOTE_ROOT}/data/experiments/reports\n"
+                f"printf '%s' '{encoded}' | base64 --decode > {cloud.REMOTE_ROOT}/data/experiments/reports/budget.json\n"
+            )
+    worker = cloud.remote_script(
+        WORKER_COMMIT,
+        exports + script,
+        with_submodules=True,
+        existing_checkout=existing_checkout,
+        normalization_sha256=normalization_sha256,
+    )
     bootstrap = detached.build_remote_script(worker, attempt=name, deadline_unix=deadline, bootstrap_only=True)
     body = cloud.launch_body(config, state, WORKER_COMMIT, name)
     body["workspace_id"] = armed["expected"]["workspace_id"]
@@ -140,6 +170,129 @@ def build_body(config, state, armed, script, report_bytes, *, rate, forecast_rat
     if len(body["user_data"].encode("utf-8")) > USER_DATA_LIMIT:
         raise ValueError("Complete UTF-8 cloud-init user_data exceeds the one-million-byte limit")
     return body
+
+
+def active_runs(state, protected_ids):
+    """Opt-in names every existing VM; pending/unknown work still blocks launch."""
+    if (
+        not isinstance(protected_ids, tuple | list)
+        or any(
+            not isinstance(value, str)
+            or re.fullmatch(r"[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", value) is None
+            for value in protected_ids
+        )
+        or len(protected_ids) != len(set(protected_ids))
+    ):
+        raise ValueError("Protected active instance IDs must be an explicit unique list")
+    opened = [run for run in state["runs"] if not run.get("ended_unix")]
+    if state.get("pending_launch") or (opened and not protected_ids):
+        raise ValueError("A recorded session is still open; reconcile it before launching")
+    if len(opened) != len(protected_ids) or {run.get("instance_id") for run in opened} != set(protected_ids):
+        raise ValueError("Protected IDs must match every open ledger run exactly")
+    return opened
+
+
+def verify_instances(instances, opened, request):
+    if not isinstance(instances, list):
+        raise ValueError("Unexpected instance-list response")
+    if any(item.get("name") == request["instance_name"] for item in instances):
+        raise ValueError("An existing project instance requires reconciliation before launch")
+    live = [
+        item
+        for item in instances
+        if item.get("workspace_id") == request["workspace_id"]
+        and str(item.get("name", "")).startswith("scalar-pi-")
+        and item.get("status") != "terminated"
+    ]
+    if len(live) != len(opened) or {item.get("id") for item in live} != {run["instance_id"] for run in opened}:
+        raise ValueError("An existing project instance requires reconciliation before launch")
+    for run in opened:
+        expected = run["watchdog"]["expected"]
+        for field, other in (
+            ("name", "instance_name"),
+            ("commit", "worker_commit"),
+            ("workspace_id", "workspace_id"),
+            ("region", "region"),
+            ("instance_type", "instance_type"),
+        ):
+            if run.get(field) != expected[other]:
+                raise ValueError("Protected ledger identity differs from its watchdog binding")
+        if any(expected[key] != request[key] for key in ("workspace_id", "worker_commit", "region", "instance_type")):
+            raise ValueError("Parallel workers must share the same workspace/source/hardware profile")
+        instance = next(item for item in live if item["id"] == run["instance_id"])
+        if instance.get("status") != "active":
+            raise ValueError("Protected instance must be active before admitting another worker")
+        validate_instance(instance, expected, run["instance_id"])
+
+
+def protected_coverage(opened, verifier, *, now, rate):
+    """Validate a private verifier's fresh AWS proof; this module needs no AWS SDK.
+
+    The callback receives copies of the exact locked ledger runs. It must GET
+    each immutable AWS version, enabled schedule, key-expiry metadata and strong
+    DynamoDB smoke/cleanup state, and prove the completed GitHub handover.
+    Cached files alone are insufficient. Returned run_sha256 binds the result
+    to the entire ledger entry; only this strict nonsecret receipt is retained.
+    """
+    if not opened:
+        return None, {"open_compute_reserve_usd": 0, "open_qualification_reserve_usd": 0}
+    if not callable(verifier):
+        raise ValueError("Parallel admission requires a fresh private cleanup verifier")
+    receipt = verifier(copy.deepcopy(opened))
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"schema_version", "observed_unix", "runs"}
+        or receipt["schema_version"] != 1
+    ):
+        raise ValueError("Unsupported protected cleanup verification receipt")
+    observed = cloud.finite_positive(receipt["observed_unix"], "Cleanup verification time")
+    checked = now()
+    if not 0 <= checked - observed <= 30:
+        raise ValueError("Protected cleanup verification must be fresh within thirty seconds")
+    proofs = receipt["runs"]
+    if not isinstance(proofs, list) or len(proofs) != len(opened):
+        raise ValueError("Cleanup verification must cover every open run")
+    fields = {
+        "instance_id",
+        "run_sha256",
+        "lease_id",
+        "lease_sha256",
+        "function_version_arn",
+        "schedule_arn",
+        "deadline_unix",
+        "cleanup_deadline_unix",
+        "key_expires_unix",
+    }
+    if any(not isinstance(proof, dict) or set(proof) != fields for proof in proofs):
+        raise ValueError("Unexpected protected cleanup proof fields")
+    if {proof["instance_id"] for proof in proofs} != {run["instance_id"] for run in opened}:
+        raise ValueError("Cleanup verification instance IDs differ")
+    total, qualification = 0.0, 0.0
+    for run in opened:
+        proof = next(item for item in proofs if item["instance_id"] == run["instance_id"])
+        leases = [
+            entry
+            for entry in run.get("cleanup_leases", [])
+            if entry.get("lease_id") == run.get("effective_cleanup_lease_id")
+        ]
+        if len(leases) != 1 or proof["run_sha256"] != sha256(run):
+            raise ValueError("Cleanup proof differs from the effective ledger lease")
+        lease = leases[0]
+        if lease.get("kind") != "aws-lambda-scheduler" or lease.get("github_conclusion") != "cancelled":
+            raise ValueError("Parallel admission requires a completed AWS cleanup handover")
+        if any(proof[field] != lease.get(field) for field in fields - {"run_sha256"}):
+            raise ValueError("Protected cleanup proof differs from the recorded AWS binding")
+        deadline = cloud.finite_positive(proof["deadline_unix"], "Protected deadline")
+        cleanup = cloud.finite_positive(proof["cleanup_deadline_unix"], "Protected cleanup deadline")
+        expiry = cloud.finite_positive(proof["key_expires_unix"], "Protected key expiry")
+        if not checked < deadline < cleanup <= expiry or cleanup - deadline != 7200:
+            raise ValueError("Protected cleanup coverage is expired or incomplete")
+        old_rate = cloud.finite_positive(run["hourly_rate_usd"], "Protected hourly rate")
+        reserved = 1.2 * (cleanup - checked) / 3600 * max(old_rate, rate)
+        total += reserved
+        if run["stage"] in {"qualification", "canary"}:
+            qualification += reserved
+    return copy.deepcopy(receipt), {"open_compute_reserve_usd": total, "open_qualification_reserve_usd": qualification}
 
 
 def launch(
@@ -155,6 +308,10 @@ def launch(
     launch_key,
     stage="qualification",
     budget_report_path=None,
+    protected_active_instance_ids=(),
+    verify_active_leases=None,
+    existing_checkout=False,
+    normalization_sha256=None,
     now=time.time,
 ):
     """Use prepared resources and one launch POST. All ambiguous outcomes stay pending."""
@@ -164,6 +321,10 @@ def launch(
     if (config["instance_type"], config["region"]) != cloud.RESEARCH_PROFILE:
         raise ValueError("Guarded launch requires the original research hardware profile")
     cloud.require_billing(config, stage)
+    if protected_active_instance_ids and not existing_checkout:
+        raise ValueError("Parallel workers require read-only existing checkout mode")
+    if protected_active_instance_ids and not callable(verify_active_leases):
+        raise ValueError("Parallel admission requires a fresh private cleanup verifier")
     script_bytes = script_path.read_bytes()
     script = script_bytes.decode("utf-8-sig")
     receipt_bytes = key_receipt_path.read_bytes()
@@ -182,8 +343,7 @@ def launch(
         raise ValueError("Worker inputs must not contain cloud credentials")
     with cloud.project_lock(state_path.with_suffix(".lock")):
         state = cloud.load_state(state_path)
-        if state.get("pending_launch") or any(not run.get("ended_unix") for run in state["runs"]):
-            raise ValueError("A recorded session is still open; reconcile it before launching")
+        opened = active_runs(state, protected_active_instance_ids)
         if any(run.get("name") == request["instance_name"] for run in state["runs"]):
             raise ValueError("An attempt name already in the ledger cannot be reused")
         if not {"ssh_key_id", "filesystem_id"}.issubset(state["resources"]):
@@ -202,18 +362,7 @@ def launch(
         ):
             raise ValueError("Configured image is not an available x86-64 GPU Base 22.04 image in this region")
         instances = reader.request("GET", "instances")
-        if not isinstance(instances, list):
-            raise ValueError("Unexpected instance-list response")
-        if any(
-            item.get("name") == request["instance_name"]
-            or (
-                item.get("workspace_id") == request["workspace_id"]
-                and str(item.get("name", "")).startswith("scalar-pi-")
-                and item.get("status") != "terminated"
-            )
-            for item in instances
-        ):
-            raise ValueError("An existing project instance requires reconciliation before launch")
+        verify_instances(instances, opened, request)
         if stage == "research":
             if not report:
                 raise ValueError("Research requires its measured budget and study decision")
@@ -221,9 +370,20 @@ def launch(
         checked_at = now()
         hours = (deadline - checked_at) / 3600
         cloud.session_deadline(config, stage, hours, checked_at)
-        allowance = cloud.check_allowance(config, state, hours, rate, stage, report)
+        coverage, reserves = protected_coverage(
+            opened, verify_active_leases, now=now, rate=max(rate, config.get("forecast_hourly_rate_usd", rate))
+        )
+        allowance = cloud.check_allowance(config, state, hours, rate, stage, report, **reserves)
         body = build_body(
-            config, state, armed, script, report_bytes, rate=rate, forecast_rate=allowance["forecast_hourly_rate_usd"]
+            config,
+            state,
+            armed,
+            script,
+            report_bytes,
+            rate=rate,
+            forecast_rate=allowance["forecast_hourly_rate_usd"],
+            existing_checkout=existing_checkout,
+            normalization_sha256=normalization_sha256,
         )
         creator = cloud.LambdaClient(launch_key)
         # All read-only cloud preflight and payload construction precede this
@@ -231,11 +391,16 @@ def launch(
         live = guard.revalidate(guard_path, expected_request=request)
         if live != armed:
             raise ValueError("Armed receipt changed during launch preparation")
+        if opened:
+            verify_instances(reader.request("GET", "instances"), opened, request)
+            coverage, reserves = protected_coverage(
+                opened, verify_active_leases, now=now, rate=allowance["forecast_hourly_rate_usd"]
+            )
         started = now()
         hours = (deadline - started) / 3600
         cloud.session_deadline(config, stage, hours, started)
         audited_key = validate_key(launch_key, key_receipt, live, now=started, master_key=master_key)
-        allowance = cloud.check_allowance(config, state, hours, rate, stage, report)
+        allowance = cloud.check_allowance(config, state, hours, rate, stage, report, **reserves)
         pending = {
             "name": request["instance_name"],
             "commit": WORKER_COMMIT,
@@ -256,6 +421,7 @@ def launch(
             "script_sha256": hashlib.sha256(script_bytes).hexdigest(),
             "budget_report_sha256": hashlib.sha256(report_bytes).hexdigest() if report_bytes else None,
             "launch_body_sha256": sha256(body),
+            **({"parallel_admission": {"protected_cleanup": coverage, **reserves}} if coverage else {}),
         }
         state["pending_launch"] = pending
         cloud.save_state(state_path, state)
@@ -263,6 +429,8 @@ def launch(
             # Even suspension after the live check cannot extend admission:
             # the provider rejects this creator key after its actual expiry.
             validate_key(launch_key, key_receipt, live, now=now(), master_key=master_key)
+            if coverage and not 0 <= now() - coverage["observed_unix"] <= 30:
+                raise ValueError("Protected cleanup verification became stale before launch")
         except BaseException:
             del state["pending_launch"]
             cloud.save_state(state_path, state)

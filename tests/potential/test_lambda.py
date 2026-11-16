@@ -1,5 +1,6 @@
 """Cloud-control tests use fake APIs; none can provision a real resource."""
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -1014,3 +1015,61 @@ def test_budget_selects_full_then_complete_pilot_then_stops():
     del profile["evaluation_seconds_per_episode"]["P"]["10"]["libero_10"]
     with pytest.raises(ValueError, match="every native"):
         choose(profile, 3.29, 2000)
+
+
+@pytest.mark.parametrize("config_name", ["pi05_libero_b0", "pi05_libero_b1", "pi05_libero_potential"])
+def test_readonly_checkout_verifies_all_ignored_normalization_assets(cloud, tmp_path, monkeypatch, config_name):
+    monkeypatch.chdir(tmp_path)
+    payload = b'{"fixture":"same normalizations"}\n'
+    for name in ("pi05_libero_b0", "pi05_libero_b1", "pi05_libero_potential"):
+        path = tmp_path / "assets" / name / "physical-intelligence/libero/norm_stats.json"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(payload)
+    program = cloud.remote_script(
+        "f" * 40, "true\n", existing_checkout=True, normalization_sha256=hashlib.sha256(payload).hexdigest()
+    )
+    assert "git fetch" not in program
+    assert "git checkout" not in program
+    assert "git submodule update" not in program
+    assert "git submodule status --recursive" in program
+    verification = program.split("python3 - <<'SCALAR_PI_VERIFY_NORMS'\n", 1)[1].split("\nSCALAR_PI_VERIFY_NORMS", 1)[0]
+    exec(compile(verification, "readonly_normalization_check", "exec"), {})
+    (tmp_path / "assets" / config_name / "physical-intelligence/libero/norm_stats.json").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="normalization differs"):
+        exec(compile(verification, "readonly_normalization_check", "exec"), {})
+
+
+@pytest.mark.parametrize("normalization", [None, "", "wrong", "x" * 64])
+def test_existing_checkout_cannot_skip_normalization_binding(cloud, normalization):
+    with pytest.raises(ValueError, match="normalization SHA256"):
+        cloud.remote_script("f" * 40, "true\n", existing_checkout=True, normalization_sha256=normalization)
+
+
+def test_open_lease_reservations_count_toward_both_project_and_phase_admission(cloud, config):
+    state = {"runs": []}
+    allowance = cloud.check_allowance(
+        config, state, 1, 3.29, "qualification", open_compute_reserve_usd=50, open_qualification_reserve_usd=25
+    )
+    assert allowance["with_reserve_usd"] == pytest.approx(100 + 50 + 1.2 * 3.29)
+    assert allowance["qualification_with_reserve_usd"] == pytest.approx(25 + 1.2 * 3.29)
+    with pytest.raises(ValueError, match="remaining project budget"):
+        cloud.check_allowance(config, state, 1, 3.29, "qualification", open_compute_reserve_usd=1900)
+    with pytest.raises(ValueError, match="phase allowance"):
+        cloud.check_allowance(
+            config, state, 1, 3.29, "qualification", open_compute_reserve_usd=100, open_qualification_reserve_usd=100
+        )
+    with pytest.raises(ValueError, match="cannot exceed"):
+        cloud.check_allowance(
+            config, state, 1, 3.29, "qualification", open_compute_reserve_usd=1, open_qualification_reserve_usd=2
+        )
+
+
+def test_open_lease_reservation_preserves_full_study_remaining_cost_gate(cloud, config):
+    report = {
+        "selected_study": "full",
+        "budget_usd": 2000,
+        "hourly_rate_usd": 3.29,
+        "remaining_compute_cost_with_headroom_usd": 1800,
+    }
+    with pytest.raises(ValueError, match="remaining balance"):
+        cloud.check_allowance(config, {"runs": []}, 1, 3.29, "research", report, open_compute_reserve_usd=101)

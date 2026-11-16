@@ -232,11 +232,25 @@ def accounted_cost(run):
     return finite_positive(run["provider_compute_upper_usd"], "provider_compute_upper_usd", zero=True)
 
 
-def check_allowance(config, state, hours, rate, stage, budget_report=None):
+def check_allowance(
+    config,
+    state,
+    hours,
+    rate,
+    stage,
+    budget_report=None,
+    *,
+    open_compute_reserve_usd=0,
+    open_qualification_reserve_usd=0,
+):
     full_study = full_study_authorization(config)
     billing = require_billing(config, stage)
     finite_positive(hours, "max_hours")
     finite_positive(rate, "hourly_rate")
+    open_reserve = finite_positive(open_compute_reserve_usd, "Open compute reserve", zero=True)
+    open_qualification = finite_positive(open_qualification_reserve_usd, "Open qualification reserve", zero=True)
+    if open_qualification > open_reserve:
+        raise ValueError("Open qualification reserve cannot exceed the open compute reserve")
     forecast_rate = finite_positive(config.get("forecast_hourly_rate_usd", rate), "forecast_hourly_rate_usd")
     if forecast_rate < rate:
         raise ValueError("Live price exceeds the forecast rate; regenerate the budget")
@@ -261,14 +275,18 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
             reserve,
             finite_positive(budget_report.get("remaining_noncompute_cost_usd", 0), "storage reserve", zero=True),
         )
-    forecast = spent + reserve + 1.2 * hours * forecast_rate
+    forecast = spent + reserve + open_reserve + 1.2 * hours * forecast_rate
     if forecast > config["budget_usd"]:
         raise ValueError("Session lifetime plus reserve exceeds the remaining project budget")
     phase_cost = {}
     if stage in {"canary", "qualification"}:
         phase_spent = sum(accounted_cost(run) for run in state["runs"] if run["stage"] in {"canary", "qualification"})
         phase_forecast = (
-            phase_spent + config["noncompute_spent_usd"] + qualification_reserve + 1.2 * hours * forecast_rate
+            phase_spent
+            + config["noncompute_spent_usd"]
+            + qualification_reserve
+            + open_qualification
+            + 1.2 * hours * forecast_rate
         )
         if phase_forecast > config["qualification_budget_usd"]:
             raise ValueError("Qualification session exceeds the configured phase allowance")
@@ -289,7 +307,7 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
             raise ValueError("Budget report ceiling/rate differs from this session; regenerate it")
         remaining = budget_report.get("remaining_compute_cost_with_headroom_usd")
         finite_positive(remaining, "remaining_compute_cost_with_headroom_usd", zero=True)
-        if spent + reserve + remaining > config["budget_usd"]:
+        if spent + reserve + open_reserve + remaining > config["budget_usd"]:
             raise ValueError("Measured study no longer fits the remaining balance; regenerate its budget decision")
     return {
         "spent_usd": spent,
@@ -301,6 +319,11 @@ def check_allowance(config, state, hours, rate, stage, budget_report=None):
         **billing,
         **phase_cost,
         **canary_cost,
+        **(
+            {"open_compute_reserve_usd": open_reserve, "open_qualification_reserve_usd": open_qualification}
+            if open_reserve
+            else {}
+        ),
     }
 
 
@@ -466,7 +489,41 @@ def terminate(client, state, state_path, instance_id):
     raise RuntimeError("Termination not confirmed. Check Lambda immediately; ledger remains open.")
 
 
-def remote_script(commit, script, *, with_submodules=True):
+def remote_script(commit, script, *, with_submodules=True, existing_checkout=False, normalization_sha256=None):
+    if not isinstance(existing_checkout, bool):
+        raise ValueError("existing_checkout must be a boolean")
+    if existing_checkout:
+        if re.fullmatch(r"[a-f0-9]{40}", commit or "") is None:
+            raise ValueError("Existing checkout requires an immutable source commit")
+        if not isinstance(normalization_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", normalization_sha256):
+            raise ValueError("Existing checkout requires the retained normalization SHA256")
+        root = shlex.quote(REMOTE_ROOT)
+        verification = (
+            "set -euo pipefail\nsudo cloud-init status --wait\nexport GIT_OPTIONAL_LOCKS=0\n"
+            f"test -d {root}/repo/.git\ncd {root}/repo\n"
+            f'test "$(git rev-parse HEAD)" = {shlex.quote(commit)}\n'
+            'test -z "$(git status --porcelain)"\n'
+        )
+        if with_submodules:
+            verification += (
+                "if git submodule status --recursive | grep -q '^[+U-]'; then exit 1; fi\n"
+                "git submodule foreach --recursive 'test -z \"$(git status --porcelain)\"'\n"
+            )
+        # assets/ is ignored by Git, so a clean checkout alone cannot establish
+        # the normalization used by any of the three matched research arms.
+        verification += (
+            "python3 - <<'SCALAR_PI_VERIFY_NORMS'\nimport hashlib\nfrom pathlib import Path\n"
+            "for config in ('pi05_libero_b0', 'pi05_libero_b1', 'pi05_libero_potential'):\n"
+            "    path = Path.cwd() / 'assets' / config / 'physical-intelligence/libero/norm_stats.json'\n"
+            "    if path.is_symlink() or path.resolve() != path or not path.is_file():\n"
+            "        raise ValueError('Retained normalization must be a regular nonsymlink file')\n"
+            f"    if hashlib.sha256(path.read_bytes()).hexdigest() != {normalization_sha256!r}:\n"
+            "        raise ValueError('Retained normalization differs from the admitted study')\n"
+            "SCALAR_PI_VERIFY_NORMS\n"
+        )
+        return verification + script.replace("\r\n", "\n") + "\n"
+    if normalization_sha256 is not None:
+        raise ValueError("Normalization binding requires existing_checkout mode")
     root = shlex.quote(REMOTE_ROOT)
     return (
         "set -euo pipefail\nsudo cloud-init status --wait\n"

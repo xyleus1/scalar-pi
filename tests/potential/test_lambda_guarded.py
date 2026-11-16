@@ -451,3 +451,242 @@ def test_dry_run_does_not_authenticate_or_create_state(guarded, setup, tmp_path,
         == 0
     )
     assert json.loads(capsys.readouterr().out)["resources_created"] == 0
+
+
+@pytest.fixture
+def parallel(guarded, setup, monkeypatch):
+    old_id = "e" * 32
+    expected = copy.deepcopy(setup.armed["expected"])
+    expected["instance_name"] = "scalar-pi-111111111111"
+    expected["tags"]["watchdog-run"] = "5678-1"
+    lease = {
+        "kind": "aws-lambda-scheduler",
+        "instance_id": old_id,
+        "lease_id": "f" * 32,
+        "lease_sha256": "a" * 64,
+        "function_version_arn": "arn:aws:lambda:us-east-1:123456789012:function:cleanup:1",
+        "schedule_arn": "arn:aws:scheduler:us-east-1:123456789012:schedule/group/cleanup",
+        "deadline_unix": NOW + 86400,
+        "cleanup_deadline_unix": NOW + 93600,
+        "key_expires_unix": NOW + 97200,
+        "github_conclusion": "cancelled",
+    }
+    run = {
+        "instance_id": old_id,
+        "name": expected["instance_name"],
+        "commit": guarded.WORKER_COMMIT,
+        "instance_type": setup.config["instance_type"],
+        "region": setup.config["region"],
+        "workspace_id": setup.request["workspace_id"],
+        "started_unix": NOW - 3600,
+        "deadline_unix": NOW + 3600,
+        "max_hours": 2,
+        "hourly_rate_usd": 3.79,
+        "stage": "qualification",
+        "allowance": {"original": "unchanged"},
+        "watchdog": {"expected": expected},
+        "cleanup_leases": [lease],
+        "effective_cleanup_lease_id": lease["lease_id"],
+    }
+    state = guarded.cloud.load_state(setup.state_path)
+    state["runs"].append(run)
+    guarded.cloud.save_state(setup.state_path, state)
+    instance = {
+        "id": old_id,
+        "name": expected["instance_name"],
+        "workspace_id": expected["workspace_id"],
+        "region": {"name": expected["region"]},
+        "instance_type": {"name": expected["instance_type"]},
+        "tags": [{"key": key, "value": value} for key, value in expected["tags"].items()],
+        "status": "active",
+    }
+    instances = [instance]
+    reader = setup.kwargs["reader"]
+    original = reader.request
+
+    def read(method, endpoint, body=None):
+        if endpoint == "instances":
+            setup.calls.append(("master", method, endpoint, body))
+            return copy.deepcopy(instances)
+        return original(method, endpoint, body)
+
+    monkeypatch.setattr(reader, "request", read)
+    proof = {
+        key: lease[key]
+        for key in (
+            "instance_id",
+            "lease_id",
+            "lease_sha256",
+            "function_version_arn",
+            "schedule_arn",
+            "deadline_unix",
+            "cleanup_deadline_unix",
+            "key_expires_unix",
+        )
+    }
+    proof["run_sha256"] = guarded.sha256(run)
+    receipt = {"schema_version": 1, "observed_unix": NOW, "runs": [proof]}
+    verifications = []
+
+    def verify(opened):
+        assert opened == [run]
+        opened[0]["allowance"]["original"] = "callback cannot mutate ledger"
+        verifications.append(1)
+        return copy.deepcopy(receipt)
+
+    setup.config["qualification_budget_usd"] = 500
+    setup.kwargs.update(
+        protected_active_instance_ids=(old_id,),
+        verify_active_leases=verify,
+        existing_checkout=True,
+        normalization_sha256="c" * 64,
+    )
+    return SimpleNamespace(run=run, instances=instances, receipt=receipt, verifications=verifications)
+
+
+def test_parallel_launch_keeps_existing_run_and_reserves_full_cleanup_window(guarded, setup, parallel):
+    new = guarded.launch(**setup.kwargs)
+    state = guarded.cloud.load_state(setup.state_path)
+    assert state["runs"][0] == parallel.run
+    assert state["runs"][1] == new
+    assert len(parallel.verifications) == 2
+    assert new["allowance"]["open_compute_reserve_usd"] == pytest.approx(26 * 3.79 * 1.2)
+    assert new["allowance"]["open_qualification_reserve_usd"] == new["allowance"]["open_compute_reserve_usd"]
+    assert new["parallel_admission"]["protected_cleanup"] == parallel.receipt
+    assert sum(call[1] == "POST" for call in setup.calls) == 1
+    body = next(call[3] for call in setup.calls if call[1] == "POST")
+    bootstrap = yaml.safe_load(body["user_data"])["runcmd"][-1][2]
+    worker = base64.b64decode(re.findall(r"printf '%s' '([A-Za-z0-9+/=]+)'", bootstrap)[1]).decode()
+    assert "git fetch" not in worker
+    assert "git checkout" not in worker
+    assert "git clone" not in worker
+    assert "SCALAR_PI_VERIFY_NORMS" in worker
+    assert "c" * 64 in worker
+
+
+def test_default_single_instance_gate_is_unchanged(guarded, setup, parallel):
+    setup.kwargs.pop("protected_active_instance_ids")
+    with pytest.raises(ValueError, match="still open"):
+        guarded.launch(**setup.kwargs)
+    assert not setup.calls
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "unknown_id",
+        "duplicate_id",
+        "pending",
+        "provider_extra",
+        "provider_tag",
+        "not_active",
+        "no_verifier",
+        "mutable_checkout",
+    ],
+)
+def test_parallel_admission_refuses_unprotected_or_ambiguous_work(guarded, setup, parallel, change):
+    if change == "unknown_id":
+        setup.kwargs["protected_active_instance_ids"] = ("9" * 32,)
+    elif change == "duplicate_id":
+        setup.kwargs["protected_active_instance_ids"] *= 2
+    elif change == "pending":
+        state = guarded.cloud.load_state(setup.state_path)
+        state["pending_launch"] = {"name": "uncertain"}
+        guarded.cloud.save_state(setup.state_path, state)
+    elif change == "provider_extra":
+        parallel.instances.append({**parallel.instances[0], "id": "9" * 32, "name": "scalar-pi-222222222222"})
+    elif change == "provider_tag":
+        parallel.instances[0]["tags"][0]["value"] = "different"
+    elif change == "not_active":
+        parallel.instances[0]["status"] = "terminating"
+    elif change == "no_verifier":
+        setup.kwargs["verify_active_leases"] = None
+    else:
+        setup.kwargs["existing_checkout"] = False
+    with pytest.raises(ValueError, match="Protected|recorded|existing project|tags differ|verifier|checkout"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_sha256", "0" * 64),
+        ("function_version_arn", "changed"),
+        ("lease_id", "changed"),
+        ("deadline_unix", NOW - 1),
+        ("key_expires_unix", NOW),
+        ("instance_id", "9" * 32),
+    ],
+)
+def test_cleanup_proof_mismatch_prevents_post(guarded, setup, parallel, field, value):
+    parallel.receipt["runs"][0][field] = value
+    with pytest.raises(ValueError, match="Cleanup|cleanup"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+@pytest.mark.parametrize("observed", [NOW - 31, NOW + 1, float("nan")])
+def test_stale_or_invalid_cleanup_verification_prevents_post(guarded, setup, parallel, observed):
+    parallel.receipt["observed_unix"] = observed
+    with pytest.raises(ValueError, match="verification"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+def test_second_cleanup_verification_failure_prevents_post(guarded, setup, parallel):
+    verifier = setup.kwargs["verify_active_leases"]
+
+    def verify(opened):
+        if parallel.verifications:
+            raise ValueError("AWS schedule became disabled")
+        return verifier(opened)
+
+    setup.kwargs["verify_active_leases"] = verify
+    with pytest.raises(ValueError, match="became disabled"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+    assert "pending_launch" not in guarded.cloud.load_state(setup.state_path)
+
+
+def test_suspend_after_pending_invalidates_parallel_verification(guarded, setup, parallel, monkeypatch):
+    clock = [NOW]
+    setup.kwargs["now"] = lambda: clock[0]
+    save = guarded.cloud.save_state
+
+    def suspend(path, state):
+        save(path, state)
+        if state.get("pending_launch"):
+            clock[0] += 31
+
+    monkeypatch.setattr(guarded.cloud, "save_state", suspend)
+    with pytest.raises(ValueError, match="became stale"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+    assert "pending_launch" not in guarded.cloud.load_state(setup.state_path)
+
+
+def test_parallel_reservation_cannot_be_ignored_by_phase_budget(guarded, setup, parallel):
+    setup.config["qualification_budget_usd"] = 100
+    with pytest.raises(ValueError, match="phase allowance"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+def test_readonly_research_budget_is_verified_without_republishing(guarded, setup):
+    body = guarded.build_body(
+        setup.config,
+        guarded.cloud.load_state(setup.state_path),
+        setup.armed,
+        "true\n",
+        b'{"budget":"exact bytes"}',
+        rate=3.79,
+        forecast_rate=3.79,
+        existing_checkout=True,
+        normalization_sha256="c" * 64,
+    )
+    bootstrap = yaml.safe_load(body["user_data"])["runcmd"][-1][2]
+    worker = base64.b64decode(re.findall(r"printf '%s' '([A-Za-z0-9+/=]+)'", bootstrap)[1]).decode()
+    assert "SCALAR_PI_VERIFY_BUDGET" in worker
+    assert "base64 --decode > /lambda/nfs/scalar-pi/data/experiments/reports/budget.json" not in worker
+    assert hashlib.sha256(b'{"budget":"exact bytes"}').hexdigest() in worker
