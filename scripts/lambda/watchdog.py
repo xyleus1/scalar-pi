@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import time
 
+from cloud import REPLICATED_PROFILES
 from cloud import RESEARCH_PROFILE
 from cloud import LambdaApiError
 from cloud import LambdaClient
@@ -61,7 +62,7 @@ def github_identity():
 
 def validate_request(value, now):
     required = {"instance_name", "workspace_id", "worker_commit", "region", "instance_type", "deadline_utc"}
-    if set(value) - required - {"launch_window_seconds"} or not required.issubset(value):
+    if set(value) - required - {"launch_window_seconds", "storage_mode"} or not required.issubset(value):
         raise ValueError("Request fields do not match the watchdog contract")
     if not re.fullmatch(r"scalar-pi-[a-f0-9]{12}", value["instance_name"]):
         raise ValueError("Use a fresh scalar-pi name with twelve random hexadecimal digits")
@@ -69,7 +70,12 @@ def validate_request(value, now):
         raise ValueError("Invalid workspace ID")
     if value["worker_commit"] != WORKER_COMMIT:
         raise ValueError("This watcher is bound to the qualified scientific worker commit")
-    if (value["instance_type"], value["region"]) != RESEARCH_PROFILE:
+    profile = (value["instance_type"], value["region"])
+    mode = value.get("storage_mode", "persistent_shared")
+    if mode == "replicated_local":
+        if profile not in REPLICATED_PROFILES:
+            raise ValueError("Replicated local request is outside the explicit dual-H100 profiles")
+    elif mode != "persistent_shared" or profile != RESEARCH_PROFILE:
         raise ValueError("Instance type and region must match the research profile")
     parsed = dt.datetime.fromisoformat(value["deadline_utc"].replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0) or parsed.microsecond:

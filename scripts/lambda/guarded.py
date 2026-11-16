@@ -132,6 +132,9 @@ def build_body(
 ):
     deadline = armed["deadline_unix"]
     name = armed["expected"]["instance_name"]
+    local_replica = cloud.storage_mode(config) == "replicated_local"
+    if local_replica and (existing_checkout or normalization_sha256 is not None or report_bytes is not None):
+        raise ValueError("Replicated local bootstrap is fresh host preparation only")
     exports = (
         f"export SCALAR_PI_HOURLY_RATE_USD={rate}\n"
         f"export SCALAR_PI_FORECAST_RATE_USD={forecast_rate}\n"
@@ -166,6 +169,10 @@ def build_body(
     body = cloud.launch_body(config, state, WORKER_COMMIT, name)
     body["workspace_id"] = armed["expected"]["workspace_id"]
     body["tags"] = [{"key": key, "value": value} for key, value in armed["expected"]["tags"].items()]
+    if local_replica:
+        from replicated_bootstrap import cloud_init_command
+
+        body["user_data"] += "  - " + json.dumps(cloud_init_command(name, deadline)) + "\n"
     body["user_data"] += "  - " + json.dumps(["bash", "-c", bootstrap]) + "\n"
     if len(body["user_data"].encode("utf-8")) > USER_DATA_LIMIT:
         raise ValueError("Complete UTF-8 cloud-init user_data exceeds the one-million-byte limit")
@@ -192,7 +199,7 @@ def active_runs(state, protected_ids):
     return opened
 
 
-def verify_instances(instances, opened, request):
+def verify_instances(instances, opened, request, *, allow_mixed_profiles=False):
     if not isinstance(instances, list):
         raise ValueError("Unexpected instance-list response")
     if any(item.get("name") == request["instance_name"] for item in instances):
@@ -217,7 +224,19 @@ def verify_instances(instances, opened, request):
         ):
             if run.get(field) != expected[other]:
                 raise ValueError("Protected ledger identity differs from its watchdog binding")
-        if any(expected[key] != request[key] for key in ("workspace_id", "worker_commit", "region", "instance_type")):
+        if allow_mixed_profiles:
+            # Cross-region replicas share the workspace, not a filesystem or GPU
+            # profile. Each existing VM remains bound to its own original guard.
+            if (
+                request.get("storage_mode") != "replicated_local"
+                or (request["instance_type"], request["region"]) not in cloud.REPLICATED_PROFILES
+                or expected["workspace_id"] != request["workspace_id"]
+                or expected["worker_commit"] != WORKER_COMMIT
+                or (expected["instance_type"], expected["region"])
+                not in {cloud.RESEARCH_PROFILE, *cloud.REPLICATED_PROFILES}
+            ):
+                raise ValueError("Protected replica identity is outside the explicit workspace/source/profiles")
+        elif any(expected[key] != request[key] for key in ("workspace_id", "worker_commit", "region", "instance_type")):
             raise ValueError("Parallel workers must share the same workspace/source/hardware profile")
         instance = next(item for item in live if item["id"] == run["instance_id"])
         if instance.get("status") != "active":
@@ -316,12 +335,19 @@ def launch(
 ):
     """Use prepared resources and one launch POST. All ambiguous outcomes stay pending."""
     cloud.validate_config(config)
+    local_replica = cloud.storage_mode(config) == "replicated_local"
+    if any(config[field] != request[field] for field in ("region", "instance_type")):
+        raise ValueError("Launch configuration differs from the pre-armed hardware/region")
+    if request.get("storage_mode", "persistent_shared") != cloud.storage_mode(config):
+        raise ValueError("Launch storage mode differs from the pre-armed request")
     if stage not in {"qualification", "research"}:
         raise ValueError("Guarded launch supports qualification and research only")
-    if (config["instance_type"], config["region"]) != cloud.RESEARCH_PROFILE:
+    if not local_replica and (config["instance_type"], config["region"]) != cloud.RESEARCH_PROFILE:
         raise ValueError("Guarded launch requires the original research hardware profile")
+    if local_replica and (stage != "qualification" or existing_checkout or normalization_sha256 is not None):
+        raise ValueError("Replicated local launch permits only a fresh qualification bootstrap")
     cloud.require_billing(config, stage)
-    if protected_active_instance_ids and not existing_checkout:
+    if protected_active_instance_ids and not existing_checkout and not local_replica:
         raise ValueError("Parallel workers require read-only existing checkout mode")
     if protected_active_instance_ids and not callable(verify_active_leases):
         raise ValueError("Parallel admission requires a fresh private cleanup verifier")
@@ -346,7 +372,8 @@ def launch(
         opened = active_runs(state, protected_active_instance_ids)
         if any(run.get("name") == request["instance_name"] for run in state["runs"]):
             raise ValueError("An attempt name already in the ledger cannot be reused")
-        if not {"ssh_key_id", "filesystem_id"}.issubset(state["resources"]):
+        required_resources = {"ssh_key_id"} if local_replica else {"ssh_key_id", "filesystem_id"}
+        if not required_resources.issubset(state["resources"]):
             raise ValueError("Prepared project resources are required")
         armed = guard.wait_ready(guard_path, timeout_seconds=60)
         deadline = bind_guard(armed, request)
@@ -362,7 +389,7 @@ def launch(
         ):
             raise ValueError("Configured image is not an available x86-64 GPU Base 22.04 image in this region")
         instances = reader.request("GET", "instances")
-        verify_instances(instances, opened, request)
+        verify_instances(instances, opened, request, allow_mixed_profiles=local_replica)
         if stage == "research":
             if not report:
                 raise ValueError("Research requires its measured budget and study decision")
@@ -392,7 +419,7 @@ def launch(
         if live != armed:
             raise ValueError("Armed receipt changed during launch preparation")
         if opened:
-            verify_instances(reader.request("GET", "instances"), opened, request)
+            verify_instances(reader.request("GET", "instances"), opened, request, allow_mixed_profiles=local_replica)
             coverage, reserves = protected_coverage(
                 opened, verify_active_leases, now=now, rate=allowance["forecast_hourly_rate_usd"]
             )
@@ -407,8 +434,8 @@ def launch(
             "instance_type": config["instance_type"],
             "region": config["region"],
             "workspace_id": request["workspace_id"],
-            "filesystem_id": state["resources"]["filesystem_id"],
-            "filesystem_mount_point": cloud.REMOTE_ROOT,
+            "filesystem_id": None if local_replica else state["resources"]["filesystem_id"],
+            "filesystem_mount_point": None if local_replica else cloud.REMOTE_ROOT,
             "started_unix": started,
             "deadline_unix": deadline,
             "hourly_rate_usd": rate,
@@ -422,6 +449,9 @@ def launch(
             "budget_report_sha256": hashlib.sha256(report_bytes).hexdigest() if report_bytes else None,
             "launch_body_sha256": sha256(body),
             **({"parallel_admission": {"protected_cleanup": coverage, **reserves}} if coverage else {}),
+            **({"storage_mode": "replicated_local", "storage_persistence": "ephemeral",
+                "local_storage_source": "/var/lib/scalar-pi-replica", "local_storage_mount": cloud.REMOTE_ROOT}
+               if local_replica else {}),
         }
         state["pending_launch"] = pending
         cloud.save_state(state_path, state)

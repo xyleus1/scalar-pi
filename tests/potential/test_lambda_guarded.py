@@ -20,6 +20,32 @@ MASTER = "fixture-master-read-only-key"
 INSTANCE_ID = "b" * 32
 
 
+def portable_setup(guarded, setup, monkeypatch, region="us-southeast-1"):
+    """Keep real admission/serialization; change only provider fixture facts."""
+    setup.config.update(storage_mode="replicated_local", instance_type="gpu_2x_h100_sxm5",
+                        region=region, max_hourly_rate_usd=9.58)
+    setup.request.update(storage_mode="replicated_local", instance_type="gpu_2x_h100_sxm5", region=region)
+    setup.armed["expected"].update(instance_type="gpu_2x_h100_sxm5", region=region)
+    setup.armed["request_sha256"] = guarded.sha256(setup.request)
+    setup.kwargs.update(existing_checkout=False, normalization_sha256=None)
+    state = guarded.cloud.load_state(setup.state_path)
+    del state["resources"]["filesystem_id"]
+    guarded.cloud.save_state(setup.state_path, state)
+    reader = setup.kwargs["reader"]
+    original = reader.request
+
+    def read(method, endpoint, body=None):
+        if endpoint == "instance-types":
+            setup.calls.append(("master", method, endpoint, body))
+            return {setup.config["instance_type"]: {
+                "instance_type": {"price_cents_per_hour": 958, "specs": {"gpus": 2}, "architecture": "x86_64"},
+                "regions_with_capacity_available": [{"name": region}],
+            }}
+        return original(method, endpoint, body)
+
+    monkeypatch.setattr(reader, "request", read)
+
+
 @pytest.fixture
 def guarded(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "scripts/lambda"))
@@ -207,6 +233,73 @@ def test_launch_is_once_detached_bound_and_recorded(guarded, setup):
     assert state["runs"] == [run]
     assert MASTER not in setup.state_path.read_text()
     assert KEY not in setup.state_path.read_text()
+
+
+@pytest.mark.parametrize("region", ["us-southeast-1", "us-south-3"])
+def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(guarded, setup, monkeypatch, region):
+    portable_setup(guarded, setup, monkeypatch, region)
+    run = guarded.launch(**setup.kwargs)
+    mutations = [call for call in setup.calls if call[1] == "POST"]
+    assert len(mutations) == 1
+    body = mutations[0][3]
+    assert body["region_name"] == region and body["instance_type_name"] == "gpu_2x_h100_sxm5"
+    assert "file_system_mounts" not in body
+    commands = yaml.safe_load(body["user_data"])["runcmd"]
+    storage, detached_command = commands[-2:]
+    assert storage[:2] == ["python3", "-c"]
+    assert "replicated_local" in storage[2] and "ephemeral" in storage[2]
+    assert storage[storage.index("--attempt") + 1] == setup.request["instance_name"]
+    assert float(storage[storage.index("--deadline-unix") + 1]) == NOW + 3600
+    worker = base64.b64decode(re.findall(r"printf '%s' '([A-Za-z0-9+/=]+)'", detached_command[2])[1]).decode()
+    assert "git clone" in worker and f"git checkout --detach {guarded.WORKER_COMMIT}" in worker
+    assert "SCALAR_PI_VERIFY_NORMS" not in worker
+    assert MASTER not in body["user_data"] and KEY not in body["user_data"]
+    assert run["filesystem_id"] is None and run["filesystem_mount_point"] is None
+    assert run["storage_mode"] == "replicated_local" and run["storage_persistence"] == "ephemeral"
+    assert run["local_storage_source"] == "/var/lib/scalar-pi-replica"
+    assert run["commit"] == guarded.WORKER_COMMIT  # Actual bootstrap checkout, not the scientific image.
+
+
+@pytest.mark.parametrize("change", ["no_opt_in", "other_region", "one_gpu", "shared_request", "other_request_region",
+                                    "research", "existing_checkout"])
+def test_portable_mismatches_fail_before_launch(guarded, setup, monkeypatch, change):
+    portable_setup(guarded, setup, monkeypatch)
+    if change == "no_opt_in":
+        del setup.config["storage_mode"]
+    elif change == "other_region":
+        setup.config["region"] = setup.request["region"] = "us-west-1"
+    elif change == "one_gpu":
+        setup.config["instance_type"] = setup.request["instance_type"] = "gpu_1x_h100_pcie"
+    elif change == "shared_request":
+        del setup.request["storage_mode"]
+    elif change == "other_request_region":
+        setup.request["region"] = "us-south-3"
+    elif change == "research":
+        setup.kwargs["stage"] = "research"
+    else:
+        setup.kwargs["existing_checkout"] = True
+    with pytest.raises(ValueError):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+def test_portable_watchdog_requires_explicit_request_opt_in(guarded, setup, monkeypatch):
+    portable_setup(guarded, setup, monkeypatch)
+    assert guarded.validate_request(setup.request, NOW)[0] == setup.request
+    missing = {key: value for key, value in setup.request.items() if key != "storage_mode"}
+    with pytest.raises(ValueError):
+        guarded.validate_request(missing, NOW)
+    with pytest.raises(ValueError):
+        guarded.validate_request({**setup.request, "region": "us-west-3"}, NOW)
+
+
+def test_portable_configuration_never_prepares_persistent_storage(guarded, setup, monkeypatch):
+    portable_setup(guarded, setup, monkeypatch)
+    with pytest.raises(ValueError, match="does not prepare a filesystem"):
+        guarded.cloud.prepare(setup.kwargs["reader"], setup.config, {}, setup.state_path)
+    with pytest.raises(ValueError, match="pre-armed"):
+        guarded.cloud.run_session(setup.kwargs["reader"], setup.config, {}, setup.state_path, SimpleNamespace())
+    assert not setup.calls
 
 
 @pytest.mark.parametrize("offset", [-1, 60, 600, 3600])
@@ -562,6 +655,59 @@ def test_parallel_launch_keeps_existing_run_and_reserves_full_cleanup_window(gua
     assert "git clone" not in worker
     assert "SCALAR_PI_VERIFY_NORMS" in worker
     assert "c" * 64 in worker
+
+
+def test_portable_launch_protects_existing_west3_host_against_its_own_identity(guarded, setup, parallel, monkeypatch):
+    original = copy.deepcopy(parallel.run)
+    portable_setup(guarded, setup, monkeypatch)
+    new = guarded.launch(**setup.kwargs)
+    state = guarded.cloud.load_state(setup.state_path)
+    assert state["runs"][0] == original
+    assert state["runs"][1] == new
+    assert len(parallel.verifications) == 2
+    assert new["parallel_admission"]["protected_cleanup"] == parallel.receipt
+    assert new["allowance"]["open_compute_reserve_usd"] >= 26 * 3.79 * 1.2
+    assert sum(call[1] == "POST" for call in setup.calls) == 1
+
+
+@pytest.mark.parametrize("change", ["provider_type", "provider_region", "provider_commit", "workspace", "bad_proof",
+                                    "unrecorded_instance", "stale_proof"])
+def test_portable_protected_host_mismatch_or_stale_proof_still_blocks(guarded, setup, parallel, monkeypatch, change):
+    portable_setup(guarded, setup, monkeypatch)
+    instance = parallel.instances[0]
+    if change == "provider_type":
+        instance["instance_type"]["name"] = "gpu_2x_h100_sxm5"
+    elif change == "provider_region":
+        instance["region"]["name"] = "us-south-3"
+    elif change == "provider_commit":
+        next(t for t in instance["tags"] if t["key"] == "commit")["value"] = "9" * 40
+    elif change == "workspace":
+        instance["workspace_id"] = "9" * 32
+    elif change == "bad_proof":
+        parallel.receipt["runs"][0]["run_sha256"] = "0" * 64
+    elif change == "stale_proof":
+        parallel.receipt["observed_unix"] = NOW - 31
+    else:
+        parallel.instances.append({**instance, "id": "9" * 32, "name": "scalar-pi-999999999999"})
+    with pytest.raises(ValueError):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+def test_portable_uncertain_post_is_retained_without_retry(guarded, setup, monkeypatch):
+    portable_setup(guarded, setup, monkeypatch)
+    def uncertain(method, endpoint, body=None):
+        setup.calls.append(("creator", method, endpoint, body))
+        raise TimeoutError("Fixture connection lost after POST")
+    monkeypatch.setattr(setup.creator, "request", uncertain)
+    with pytest.raises(RuntimeError, match="Launch response uncertain"):
+        guarded.launch(**setup.kwargs)
+    state = guarded.cloud.load_state(setup.state_path)
+    assert state["pending_launch"]["storage_persistence"] == "ephemeral"
+    assert state["pending_launch"]["filesystem_id"] is None
+    with pytest.raises(ValueError, match="still open"):
+        guarded.launch(**setup.kwargs)
+    assert sum(call[1] == "POST" for call in setup.calls) == 1
 
 
 def test_default_single_instance_gate_is_unchanged(guarded, setup, parallel):

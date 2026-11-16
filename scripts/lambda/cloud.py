@@ -27,6 +27,10 @@ REPOSITORY = "https://github.com/xyleus1/scalar-pi.git"
 REMOTE_ROOT = "/lambda/nfs/scalar-pi"
 RESEARCH_PROFILE = ("gpu_1x_h100_pcie", "us-west-3")
 CANARY_PROFILES = {RESEARCH_PROFILE, ("gpu_1x_h100_sxm5", "us-south-2")}
+REPLICATED_PROFILES = {
+    ("gpu_2x_h100_sxm5", "us-southeast-1"),
+    ("gpu_2x_h100_sxm5", "us-south-3"),
+}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -123,7 +127,11 @@ def finite_positive(value, name, *, zero=False):
 
 
 def validate_config(config):
-    if (config["instance_type"], config["region"]) not in CANARY_PROFILES:
+    profile = (config["instance_type"], config["region"])
+    mode = storage_mode(config)
+    if mode == "replicated_local" and profile not in REPLICATED_PROFILES:
+        raise ValueError("Replicated local storage requires an explicitly admitted dual-H100 SXM profile")
+    if mode == "persistent_shared" and profile not in CANARY_PROFILES:
         raise ValueError("Use the research H100 PCIe profile or the canary-only H100 SXM profile")
     filesystem_name = config.get("filesystem_name", "scalar-pi")
     if not isinstance(filesystem_name, str) or re.fullmatch(r"scalar-pi(?:-[a-z0-9-]+)?", filesystem_name) is None:
@@ -150,6 +158,13 @@ def validate_config(config):
         raise ValueError("Forecast rate must cover the maximum permitted live rate")
     if "canary_allowance_usd" in config or "canary_noncompute_reserve_usd" in config:
         canary_allowance(config)
+
+
+def storage_mode(config):
+    mode = config.get("storage_mode", "persistent_shared")
+    if not isinstance(mode, str) or mode not in {"persistent_shared", "replicated_local"}:
+        raise ValueError("Use an explicit supported storage mode")
+    return mode
 
 
 def full_study_authorization(config):
@@ -351,8 +366,9 @@ def select_type(client, config):
     item = client.request("GET", "instance-types")[config["instance_type"]]
     instance_type = item["instance_type"]
     rate = instance_type["price_cents_per_hour"] / 100
-    if instance_type["specs"]["gpus"] != 1 or instance_type["architecture"] != "x86_64":
-        raise ValueError("Expected one x86-64 H100 instance")
+    expected_gpus = 2 if storage_mode(config) == "replicated_local" else 1
+    if instance_type["specs"]["gpus"] != expected_gpus or instance_type["architecture"] != "x86_64":
+        raise ValueError(f"Expected {expected_gpus} GPUs on an x86-64 H100 instance")
     if rate > config["max_hourly_rate_usd"]:
         raise ValueError("Current quote exceeds configured maximum; inspect and revise the cost estimate")
     if config["region"] not in {region["name"] for region in item["regions_with_capacity_available"]}:
@@ -361,6 +377,8 @@ def select_type(client, config):
 
 
 def prepare(client, config, state, state_path):
+    if storage_mode(config) == "replicated_local":
+        raise ValueError("Replicated local launch reuses the recorded SSH key and does not prepare a filesystem")
     billing = require_billing(config, "canary")
     rate = select_type(client, config)
     if billing["billing_basis"] == "authorized_paid_budget":
@@ -434,16 +452,20 @@ systemctl restart docker
         "  - [ufw, --force, enable]\n"
         f"  - {json.dumps(['bash', '-c', runtime_setup])}\n"
     )
-    return {
+    body = {
         "region_name": config["region"],
         "instance_type_name": config["instance_type"],
         "ssh_key_names": ["scalar-pi"],
-        "file_system_mounts": [{"file_system_id": state["resources"]["filesystem_id"], "mount_point": REMOTE_ROOT}],
         "image": {"id": config["image_id"]},
         "name": name,
         "user_data": user_data,
         "tags": [{"key": "project", "value": "scalar-pi"}, {"key": "commit", "value": commit}],
     }
+    if storage_mode(config) == "persistent_shared":
+        body["file_system_mounts"] = [
+            {"file_system_id": state["resources"]["filesystem_id"], "mount_point": REMOTE_ROOT}
+        ]
+    return body
 
 
 def terminate(client, state, state_path, instance_id):
@@ -538,6 +560,8 @@ def remote_script(commit, script, *, with_submodules=True, existing_checkout=Fal
 
 
 def run_session(client, config, state, state_path, args):
+    if storage_mode(config) == "replicated_local":
+        raise ValueError("Replicated local instances require the pre-armed guarded launcher")
     if args.stage != "canary" and (config["instance_type"], config["region"]) != RESEARCH_PROFILE:
         raise ValueError("Alternate hardware is canary-only; qualification and research require the original profile")
     require_billing(config, args.stage)
