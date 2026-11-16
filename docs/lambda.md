@@ -79,6 +79,22 @@ result artifact and use its observed termination time when closing the ledger.
 Provider or GitHub outages can still delay cleanup; this mechanism removes the
 workstation-suspension dependency, not every infrastructure failure mode.
 
+For a separately authorized longer lease on the same instance,
+`aws-cleanup.json` deploys a standard AWS Lambda function, one-time EventBridge
+schedule, encrypted secret, retry state and failure queue. Package
+`aws_cleanup.py`, `cloud.py`, and `watchdog.py` at the ZIP root, and supply an
+existing read/terminate-only secret pinned by version and hash. The template
+accepts no raw credential. Each published function binds one instance ID and
+the original immutable identity tags, with a deadline at most 24 hours away.
+
+Before retiring the existing GitHub watcher, verify the exact published code,
+enabled deadline schedule and asynchronous failure handling, then complete both
+an actual GET-only invocation and an actual scheduled GET-only smoke. Their
+proofs must be present in the durable state for the same function version and
+lease. Preserve the original deadline in the ledger and record any replacement
+lease separately. This extends instance cleanup only: running workers retain
+their original deadlines, and subsequent workers still run in bounded chunks.
+
 ## 1. Private account settings
 
 Copy `configs/potential/lambda.example.json` outside Git, normally to

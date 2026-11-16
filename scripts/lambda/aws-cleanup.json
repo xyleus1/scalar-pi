@@ -1,0 +1,466 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "One-instance Lambda Cloud deadline cleanup, with immutable AWS Lambda code and durable retry state. No cloud API key is accepted by this template.",
+  "Metadata": {
+    "DeploymentContract": {
+      "RetainedSchedule": "AWS::Scheduler::Schedule does not expose ActionAfterCompletion. Keep the default NONE and verify it with GetSchedule after deployment.",
+      "CleanupSecret": "Use an existing same-region Secrets Manager secret containing only the scoped Lambda Cloud read/terminate key, encrypted with the AWS managed Secrets Manager key.",
+      "Lease": "LeaseJson must contain the exact instance binding, absolute deadline and actual cleanup-key expiry; LeaseSha256 binds its canonical JSON.",
+      "Smoke": "Verify the published function through a separate GET-only schedule in this group before retiring another cleanup guard.",
+      "Concurrency": "No reserved concurrency is requested. The handler must serialize repeated invocations using conditional DynamoDB state updates."
+    }
+  },
+  "Parameters": {
+    "CodeBucket": {
+      "Type": "String",
+      "MinLength": 3,
+      "MaxLength": 63,
+      "Description": "Existing same-region versioned S3 bucket containing the reviewed function ZIP."
+    },
+    "CodeKey": {
+      "Type": "String",
+      "MinLength": 1,
+      "MaxLength": 1024,
+      "Description": "S3 key of the reviewed function ZIP."
+    },
+    "CodeObjectVersion": {
+      "Type": "String",
+      "MinLength": 1,
+      "MaxLength": 1024,
+      "AllowedPattern": "(?!null$).+",
+      "Description": "Immutable S3 object version ID; an unversioned null object is not accepted."
+    },
+    "CodeSha256": {
+      "Type": "String",
+      "AllowedPattern": "[A-Za-z0-9+/]{43}=",
+      "Description": "Base64-encoded SHA256 of the exact ZIP bytes, as required by AWS Lambda PublishVersion."
+    },
+    "LeaseId": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{32}",
+      "Description": "Unique 32-character lowercase hexadecimal cleanup lease ID."
+    },
+    "LeaseJson": {
+      "Type": "String",
+      "MinLength": 2,
+      "MaxLength": 3000,
+      "Description": "Reviewed JSON lease specification, including actual cleanup-key expiry. Must contain no credentials."
+    },
+    "LeaseSha256": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{64}",
+      "Description": "SHA256 of the lease specification using the handler's canonical JSON encoding."
+    },
+    "CleanupSecretArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+",
+      "Description": "Existing same-region secret ARN. The secret value is the raw scoped cleanup key; never pass its value to CloudFormation."
+    },
+    "DeadlineScheduleExpression": {
+      "Type": "String",
+      "AllowedPattern": "at\\([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\)",
+      "Description": "One-time at(YYYY-MM-DDTHH:MM:SS) expression for the approved absolute UTC deadline."
+    }
+  },
+  "Resources": {
+    "StateTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "lease_id",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "lease_id",
+            "KeyType": "HASH"
+          }
+        ]
+      }
+    },
+    "FailureQueue": {
+      "Type": "AWS::SQS::Queue",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "SqsManagedSseEnabled": true
+      }
+    },
+    "CleanupLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/scalar-pi-cleanup-${LeaseId}"
+        },
+        "RetentionInDays": 30
+      }
+    },
+    "CleanupRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "exact-lease-cleanup",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "OwnLeaseState",
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:UpdateItem"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "StateTable",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "ForAllValues:StringEquals": {
+                      "dynamodb:LeadingKeys": [
+                        {
+                          "Ref": "LeaseId"
+                        }
+                      ]
+                    },
+                    "Null": {
+                      "dynamodb:LeadingKeys": "false"
+                    }
+                  }
+                },
+                {
+                  "Sid": "ScopedCleanupCredential",
+                  "Effect": "Allow",
+                  "Action": "secretsmanager:GetSecretValue",
+                  "Resource": {
+                    "Ref": "CleanupSecretArn"
+                  }
+                },
+                {
+                  "Sid": "OwnLogs",
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "CleanupLogGroup",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Sid": "RetainFailedInvocation",
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "FailureQueue",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CleanupFunction": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "CleanupLogGroup",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "scalar-pi-cleanup-${LeaseId}"
+        },
+        "Description": "Terminates only the bound Lambda Cloud instance after its approved absolute deadline.",
+        "Runtime": "python3.13",
+        "Handler": "aws_cleanup.handler",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Timeout": 900,
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "CleanupRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeBucket"
+          },
+          "S3Key": {
+            "Ref": "CodeKey"
+          },
+          "S3ObjectVersion": {
+            "Ref": "CodeObjectVersion"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "SCALAR_PI_LEASE_ID": {
+              "Ref": "LeaseId"
+            },
+            "SCALAR_PI_LEASE_JSON": {
+              "Ref": "LeaseJson"
+            },
+            "SCALAR_PI_LEASE_SHA256": {
+              "Ref": "LeaseSha256"
+            },
+            "SCALAR_PI_STATE_TABLE": {
+              "Ref": "StateTable"
+            },
+            "SCALAR_PI_SECRET_ARN": {
+              "Ref": "CleanupSecretArn"
+            }
+          }
+        }
+      }
+    },
+    "CleanupVersion": {
+      "Type": "AWS::Lambda::Version",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "CleanupFunction"
+        },
+        "CodeSha256": {
+          "Ref": "CodeSha256"
+        },
+        "Description": {
+          "Fn::Sub": "Immutable cleanup for lease ${LeaseId}; lease SHA256 ${LeaseSha256}."
+        }
+      }
+    },
+    "AsyncInvocation": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "CleanupFunction"
+        },
+        "Qualifier": {
+          "Fn::GetAtt": [
+            "CleanupVersion",
+            "Version"
+          ]
+        },
+        "MaximumRetryAttempts": 2,
+        "MaximumEventAgeInSeconds": 3600,
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Fn::GetAtt": [
+                "FailureQueue",
+                "Arn"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "ScheduleGroup": {
+      "Type": "AWS::Scheduler::ScheduleGroup",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "scalar-pi-cleanup-${LeaseId}"
+        }
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Fn::GetAtt": [
+                      "ScheduleGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "invoke-exact-cleanup-version",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "InvokeReviewedVersion",
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": {
+                    "Ref": "CleanupVersion"
+                  }
+                },
+                {
+                  "Sid": "RetainFailedDelivery",
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "FailureQueue",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "DeadlineSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "DependsOn": "AsyncInvocation",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "terminate-${LeaseId}"
+        },
+        "GroupName": {
+          "Ref": "ScheduleGroup"
+        },
+        "Description": {
+          "Fn::Sub": "Retained one-time termination schedule for scalar-pi lease ${LeaseId}."
+        },
+        "ScheduleExpression": {
+          "Ref": "DeadlineScheduleExpression"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "State": "ENABLED",
+        "Target": {
+          "Arn": {
+            "Ref": "CleanupVersion"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 3600,
+            "MaximumRetryAttempts": 185
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "FailureQueue",
+                "Arn"
+              ]
+            }
+          },
+          "Input": {
+            "Fn::Sub": "{\"lease_id\":\"${LeaseId}\",\"lease_sha256\":\"${LeaseSha256}\",\"mode\":\"execute\",\"schedule_arn\":\"<aws.scheduler.schedule-arn>\",\"scheduled_time\":\"<aws.scheduler.scheduled-time>\",\"execution_id\":\"<aws.scheduler.execution-id>\"}"
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ScheduleGroupName": {
+      "Value": {
+        "Ref": "ScheduleGroup"
+      }
+    },
+    "ScheduleName": {
+      "Value": {
+        "Ref": "DeadlineSchedule"
+      }
+    },
+    "ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "DeadlineSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "FunctionVersionArn": {
+      "Value": {
+        "Ref": "CleanupVersion"
+      }
+    },
+    "StateTableName": {
+      "Value": {
+        "Ref": "StateTable"
+      }
+    },
+    "FailureQueueUrl": {
+      "Value": {
+        "Ref": "FailureQueue"
+      }
+    },
+    "FailureQueueArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FailureQueue",
+          "Arn"
+        ]
+      }
+    },
+    "FunctionName": {
+      "Value": {
+        "Ref": "CleanupFunction"
+      }
+    },
+    "CleanupSecretArn": {
+      "Value": {
+        "Ref": "CleanupSecretArn"
+      }
+    },
+    "SchedulerRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SchedulerRole",
+          "Arn"
+        ]
+      }
+    }
+  }
+}
