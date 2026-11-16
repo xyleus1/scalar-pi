@@ -271,7 +271,7 @@ def watch(receipt, output, *, execute=False, client=None, now=time.time, sleep=t
     acknowledged = False
     attempts = 0
     last_post = None
-    active_observations = 0
+    available_observations = 0
     try:
         # Keep discovering through cleanup expiry even after the admission window
         # closes: an accepted launch may become visible late. The launch gate,
@@ -311,12 +311,14 @@ def watch(receipt, output, *, execute=False, client=None, now=time.time, sleep=t
                 validate_instance(instance, expected, instance_id)
             if receipt["deadline_unix"] <= now() < until and not acknowledged:
                 available = instance.get("actions", {}).get("terminate", {}).get("available") is True
-                active_observations = active_observations + 1 if instance.get("status") == "active" else 0
-                reconciled = last_post is None or (now() - last_post >= RECONCILE_SECONDS and active_observations >= 3)
+                available_observations = available_observations + 1 if available else 0
+                reconciled = last_post is None or (
+                    now() - last_post >= RECONCILE_SECONDS and available_observations >= 3
+                )
                 if available and reconciled and attempts < MAX_TERMINATE_ATTEMPTS:
                     attempts += 1
                     last_post = now()
-                    active_observations = 0
+                    available_observations = 0
                     event("terminate_requested", instance_id=instance_id, attempt=attempts)
                     try:
                         response = client.request(

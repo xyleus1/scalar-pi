@@ -237,7 +237,9 @@ def test_minimal_terminating_response_keeps_polling_bound_id(setup, monkeypatch)
     assert not setup.client.posts()
 
 
-def test_acknowledged_post_is_never_repeated_even_if_active_status_lags(setup):
+@pytest.mark.parametrize("status", ["active", "unhealthy", "booting"])
+def test_acknowledged_post_is_never_repeated_even_if_status_lags(setup, status):
+    setup.client.instance["status"] = status
     setup.client.terminate_effect = lambda: {"terminated_instances": [{"id": "b" * 32}]}
     result = run(setup)
     assert result["status"] == "unresolved"
@@ -245,7 +247,10 @@ def test_acknowledged_post_is_never_repeated_even_if_active_status_lags(setup):
     assert len(setup.client.posts()) == 1
 
 
-def test_uncertain_post_then_terminating_is_not_repeated(setup):
+@pytest.mark.parametrize("status", ["active", "unhealthy", "booting"])
+def test_uncertain_post_then_terminating_is_not_repeated(setup, status):
+    setup.client.instance["status"] = status
+
     def terminate():
         setup.client.instance["status"] = "terminating"
         setup.client.terminate_at = setup.clock.now() + 30
@@ -256,7 +261,10 @@ def test_uncertain_post_then_terminating_is_not_repeated(setup):
     assert len(setup.client.posts()) == 1
 
 
-def test_uncertain_post_requires_reconciliation_before_bounded_retry(setup):
+@pytest.mark.parametrize("status", ["active", "unhealthy", "booting"])
+def test_uncertain_post_requires_reconciliation_before_bounded_retry(setup, status):
+    setup.client.instance["status"] = status
+
     def terminate():
         raise TimeoutError("No acknowledgement")
 
@@ -268,6 +276,29 @@ def test_uncertain_post_requires_reconciliation_before_bounded_retry(setup):
     for first, second in itertools.pairwise(calls):
         reads = [call for call in setup.client.calls if first[0] < call[0] <= second[0] and call[1] == "GET"]
         assert len(reads) >= 3
+
+
+def test_unavailable_observation_resets_uncertain_post_reconciliation(setup, monkeypatch):
+    original = setup.client.request
+    deadline = setup.receipt["deadline_unix"]
+
+    def request(method, endpoint, body=None):
+        if endpoint.startswith("instances/"):
+            elapsed = setup.clock.now() - deadline
+            setup.client.instance["actions"]["terminate"]["available"] = elapsed != 50
+        return original(method, endpoint, body)
+
+    def terminate():
+        if len(setup.client.posts()) == 1:
+            raise TimeoutError("No acknowledgement")
+        setup.client.instance["status"] = "terminating"
+        setup.client.terminate_at = setup.clock.now() + 10
+        return {"terminated_instances": [{"id": "b" * 32}]}
+
+    monkeypatch.setattr(setup.client, "request", request)
+    setup.client.terminate_effect = terminate
+    assert run(setup)["status"] == "terminated"
+    assert [call[0] - deadline for call in setup.client.posts()] == [0, 80]
 
 
 def test_forbidden_post_is_never_retried(setup):
