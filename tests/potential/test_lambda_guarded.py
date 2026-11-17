@@ -20,12 +20,25 @@ MASTER = "fixture-master-read-only-key"
 INSTANCE_ID = "b" * 32
 
 
-def portable_setup(guarded, setup, monkeypatch, region="us-southeast-1"):
+def portable_setup(
+    guarded,
+    setup,
+    monkeypatch,
+    region="us-southeast-1",
+    *,
+    instance_type="gpu_2x_h100_sxm5",
+    gpu_count=2,
+    rate_cents=958,
+):
     """Keep real admission/serialization; change only provider fixture facts."""
-    setup.config.update(storage_mode="replicated_local", instance_type="gpu_2x_h100_sxm5",
-                        region=region, max_hourly_rate_usd=9.58)
-    setup.request.update(storage_mode="replicated_local", instance_type="gpu_2x_h100_sxm5", region=region)
-    setup.armed["expected"].update(instance_type="gpu_2x_h100_sxm5", region=region)
+    setup.config.update(
+        storage_mode="replicated_local",
+        instance_type=instance_type,
+        region=region,
+        max_hourly_rate_usd=rate_cents / 100,
+    )
+    setup.request.update(storage_mode="replicated_local", instance_type=instance_type, region=region)
+    setup.armed["expected"].update(instance_type=instance_type, region=region)
     setup.armed["request_sha256"] = guarded.sha256(setup.request)
     setup.kwargs.update(existing_checkout=False, normalization_sha256=None)
     state = guarded.cloud.load_state(setup.state_path)
@@ -37,10 +50,16 @@ def portable_setup(guarded, setup, monkeypatch, region="us-southeast-1"):
     def read(method, endpoint, body=None):
         if endpoint == "instance-types":
             setup.calls.append(("master", method, endpoint, body))
-            return {setup.config["instance_type"]: {
-                "instance_type": {"price_cents_per_hour": 958, "specs": {"gpus": 2}, "architecture": "x86_64"},
-                "regions_with_capacity_available": [{"name": region}],
-            }}
+            return {
+                setup.config["instance_type"]: {
+                    "instance_type": {
+                        "price_cents_per_hour": rate_cents,
+                        "specs": {"gpus": gpu_count},
+                        "architecture": "x86_64",
+                    },
+                    "regions_with_capacity_available": [{"name": region}],
+                }
+            }
         return original(method, endpoint, body)
 
     monkeypatch.setattr(reader, "request", read)
@@ -235,14 +254,26 @@ def test_launch_is_once_detached_bound_and_recorded(guarded, setup):
     assert KEY not in setup.state_path.read_text()
 
 
-@pytest.mark.parametrize("region", ["us-southeast-1", "us-south-3"])
-def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(guarded, setup, monkeypatch, region):
-    portable_setup(guarded, setup, monkeypatch, region)
+@pytest.mark.parametrize(
+    ("region", "instance_type", "gpu_count", "rate_cents"),
+    [
+        ("us-southeast-1", "gpu_2x_h100_sxm5", 2, 958),
+        ("us-south-3", "gpu_2x_h100_sxm5", 2, 958),
+        ("us-south-2", "gpu_4x_h100_sxm5", 4, 1876),
+    ],
+)
+def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(
+    guarded, setup, monkeypatch, region, instance_type, gpu_count, rate_cents
+):
+    portable_setup(
+        guarded, setup, monkeypatch, region, instance_type=instance_type, gpu_count=gpu_count, rate_cents=rate_cents
+    )
     run = guarded.launch(**setup.kwargs)
     mutations = [call for call in setup.calls if call[1] == "POST"]
     assert len(mutations) == 1
     body = mutations[0][3]
-    assert body["region_name"] == region and body["instance_type_name"] == "gpu_2x_h100_sxm5"
+    assert body["region_name"] == region
+    assert body["instance_type_name"] == instance_type
     assert "file_system_mounts" not in body
     commands = yaml.safe_load(body["user_data"])["runcmd"]
     storage, detached_command = commands[-2:]
@@ -253,15 +284,35 @@ def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(g
     worker = base64.b64decode(re.findall(r"printf '%s' '([A-Za-z0-9+/=]+)'", detached_command[2])[1]).decode()
     assert "git clone" in worker and f"git checkout --detach {guarded.WORKER_COMMIT}" in worker
     assert "SCALAR_PI_VERIFY_NORMS" not in worker
+    assert f"export SCALAR_PI_EXPECTED_GPU_COUNT={gpu_count}\n" in worker
     assert MASTER not in body["user_data"] and KEY not in body["user_data"]
     assert run["filesystem_id"] is None and run["filesystem_mount_point"] is None
     assert run["storage_mode"] == "replicated_local" and run["storage_persistence"] == "ephemeral"
     assert run["local_storage_source"] == "/var/lib/scalar-pi-replica"
+    assert run["hourly_rate_usd"] == rate_cents / 100  # Whole VM, including unused GPUs.
     assert run["commit"] == guarded.WORKER_COMMIT  # Actual bootstrap checkout, not the scientific image.
 
 
-@pytest.mark.parametrize("change", ["no_opt_in", "other_region", "one_gpu", "shared_request", "other_request_region",
-                                    "research", "existing_checkout"])
+@pytest.mark.parametrize("gpu_count", [1, 2, 3, 8])
+def test_four_gpu_profile_rejects_wrong_physical_count_before_launch(guarded, setup, monkeypatch, gpu_count):
+    portable_setup(
+        guarded,
+        setup,
+        monkeypatch,
+        "us-south-2",
+        instance_type="gpu_4x_h100_sxm5",
+        gpu_count=gpu_count,
+        rate_cents=1876,
+    )
+    with pytest.raises(ValueError, match="Expected 4 GPUs"):
+        guarded.launch(**setup.kwargs)
+    assert not any(call[1] == "POST" for call in setup.calls)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["no_opt_in", "other_region", "one_gpu", "shared_request", "other_request_region", "research", "existing_checkout"],
+)
 def test_portable_mismatches_fail_before_launch(guarded, setup, monkeypatch, change):
     portable_setup(guarded, setup, monkeypatch)
     if change == "no_opt_in":
@@ -670,8 +721,18 @@ def test_portable_launch_protects_existing_west3_host_against_its_own_identity(g
     assert sum(call[1] == "POST" for call in setup.calls) == 1
 
 
-@pytest.mark.parametrize("change", ["provider_type", "provider_region", "provider_commit", "workspace", "bad_proof",
-                                    "unrecorded_instance", "stale_proof"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "provider_type",
+        "provider_region",
+        "provider_commit",
+        "workspace",
+        "bad_proof",
+        "unrecorded_instance",
+        "stale_proof",
+    ],
+)
 def test_portable_protected_host_mismatch_or_stale_proof_still_blocks(guarded, setup, parallel, monkeypatch, change):
     portable_setup(guarded, setup, monkeypatch)
     instance = parallel.instances[0]
@@ -696,9 +757,11 @@ def test_portable_protected_host_mismatch_or_stale_proof_still_blocks(guarded, s
 
 def test_portable_uncertain_post_is_retained_without_retry(guarded, setup, monkeypatch):
     portable_setup(guarded, setup, monkeypatch)
+
     def uncertain(method, endpoint, body=None):
         setup.calls.append(("creator", method, endpoint, body))
         raise TimeoutError("Fixture connection lost after POST")
+
     monkeypatch.setattr(setup.creator, "request", uncertain)
     with pytest.raises(RuntimeError, match="Launch response uncertain"):
         guarded.launch(**setup.kwargs)

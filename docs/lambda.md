@@ -41,6 +41,14 @@ commands with `--execute` when ready. The guarded launcher starts only the
 explicitly supplied worker script. Research still requires completed qualification
 and a measured budget decision.
 
+For host qualification, guarded launches also accept explicit `replicated_local`
+profiles: two H100 SXM GPUs in `us-southeast-1` or `us-south-3`, and four H100 SXM
+GPUs in `us-south-2`. The provider's physical GPU count must match that profile.
+These hosts use an owned local bind mount with ephemeral storage, so checkpoints
+need a verified durable copy before the source host is retired. The hourly quote
+and accounting cover the whole VM, including any GPUs left unused. Launching a
+host does not qualify its GPUs or reassign any running experiment.
+
 ## Unattended execution
 
 Do not use the legacy Windows-owned session controller for unattended work.

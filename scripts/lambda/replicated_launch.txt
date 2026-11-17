@@ -1,8 +1,9 @@
 Replicated local H100 host admission
 
-This controller adds only two explicit launch profiles:
+This controller supports three explicit launch profiles:
   gpu_2x_h100_sxm5 / us-southeast-1
   gpu_2x_h100_sxm5 / us-south-3
+  gpu_4x_h100_sxm5 / us-south-2
 Both config and armed request must say storage_mode="replicated_local".
 Legacy shared-storage launches keep their existing behavior and guards.
 
@@ -19,14 +20,11 @@ Publication and preparation (operator owns execution)
    no branch-policy relaxation is needed. Active f532/a9 guests stay unchanged.
 2. Exercise the existing GitHubGuard dry-run artifact handshake with the NEW exact
    profile/storage_mode request. It must report zero provider API operations.
-3. Capture the immutable two-host cutoff and issue its actual budget job before
-   additional admission. Root's reviewed accounting plan permits new hosts while
-   that job harvests: record every post-cutoff start, rate and cleanup bound, then
-   reserve those costs once in new itemized planning evidence with coverage
-   all_unaccounted_nonstorage_since_capture_through_retention before selection.
-   Do not rewrite the captured ledger, double count those charges or claim the
-   original two-host measurements cover them. No frozen budget helper changes
-   are required. Obtain fresh regional capacity and GPU Base22.04 x86-64 image
+3. Preserve the captured accounting cutoff and include every post-cutoff start,
+   whole-VM rate and cleanup bound in the existing itemized planning evidence.
+   Reserve those costs once; do not rewrite the captured ledger or claim older
+   measurements cover new hosts. No frozen budget helper changes are required.
+   Obtain fresh regional capacity and GPU Base22.04 x86-64 image
    IDs from actual provider GETs before each serialized new launch.
 4. Copy replicated_preflight.sh byte-for-byte into a NEW private input directory
    beneath the existing control root. Pin it, the new config, existing full-study
@@ -36,16 +34,15 @@ Publication and preparation (operator owns execution)
 
 Config is the existing cloud config with these explicit changes:
   storage_mode: replicated_local
-  instance_type: gpu_2x_h100_sxm5
-  region: one exact region above
+  instance_type / region: one exact pair above
   image_id: actual current GPU Base22.04 x86-64 image in that region
   max_hourly_rate_usd / forecast_hourly_rate_usd: current admitted VM quote
   budget_usd / qualification_budget_usd / reserves: finite adequate allocations
   full_study_authorized: true, with the existing authorization evidence
 Keep the existing operator /32 and SSH-key preparation. No new filesystem is
 created or attached. The root ledger resources only need the recorded SSH key.
-Advertised dual-host specs observed by the operator were52 vCPUs,450GiB RAM,
-5632GiB storage,2x80GB GPUs at9.58 USD per VM-hour; actual inventory must be checked.
+Physical GPU count, host inventory and the whole-VM quote must be checked against
+the selected profile. Unassigned GPUs remain billed as part of the whole VM.
 
 Exact plan schema (all path/hash references are canonical local private files):
 {
@@ -99,25 +96,30 @@ uses a previous filesystem persistence proof. The unchanged ceaf detached worker
 then waits for cloud-init and the actual mount and runs the pinned host probe.
 Partial mount state blocks automatic replay. No disk is formatted or moved.
 
-The probe requires actual mounted free space>=400GiB and RAM>=400GiB, two unique
-H100 UUIDs with>=80000MiB each and compute capability9.0, and no GPU/container
+The probe requires actual mounted free space and RAM of at least 400 GiB for the
+two-GPU profile or 800 GiB for the four-GPU profile, the exact expected number of
+unique H100 UUIDs with >=80000 MiB each and compute capability 9.0, and no GPU/container
 work. It records driver/kernel/Docker rather than declaring them qualified. If
 the advertised large disk is mounted elsewhere and this path lacks capacity,
 stop and inspect the actual devices/mounts; do not blindly format or relocate.
 
-Retain bootstrap/result/ExecStopPost and host inventory evidence, then run the
-UNCHANGED scoped cleanup interface separately for the exact new launch receipt:
+Retain bootstrap/result/ExecStopPost and host inventory evidence. Create a fresh
+dedicated cleanup identity for each new VM, with only workspace-scoped read and
+terminate permissions. Prepare its lease through the existing scoped adapter's
+prepare(..., identity) function, passing that exact identity explicitly. The old
+CLI prepare command defaults to a previously used identity; do not reuse it here.
+Then run the unchanged scoped cleanup interface for the exact new launch receipt:
   <control>/aws-tools/Scripts/python.exe <control>/scoped_cleanup_20261116.py ACTION
     --aws-plan <actual plan> --launch-receipt <control>/extra-workers/ATTEMPT/launch.json
     --lease-path <new private lease metadata> --execute
-ACTION order: prepare, deploy, smoke, handover. Both direct and real scheduled
+ACTION order after explicit preparation: deploy, smoke, handover. Direct and scheduled
 GET-only smoke must pass before cancelling the old exact GitHub guard. The new
 AWS lease remains finite24h with its existing retry window and scoped service
 key. Only after that completed handover frees the serialized GitHub group should
-the second host launch; its protected_workers list includes all three old hosts.
+the next host launch; its protected_workers list includes every currently open VM.
 
 After admission, independently replicate hash-verified immutable inputs/images
-to local disk, qualify the actual dual-SXM slots, and use a separate reviewed
+to local disk, qualify each assigned SXM slot, and use a separate reviewed
 per-GPU dispatcher. Preserve canonical /data aliases; never claim a west3 FS
 attachment. Export checkpoints at clean bounded-job boundaries and validate
 imports before canonical evaluation. All LIBERO evaluation remains on west3.

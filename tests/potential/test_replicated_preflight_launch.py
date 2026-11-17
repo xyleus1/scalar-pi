@@ -1,11 +1,13 @@
 """Synthetic-only private launch wrapper tests; every remote service is mocked."""
 
+import ast
 import copy
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -74,9 +76,7 @@ def case(tmp_path, monkeypatch):
             "github_cleanup_receipt",
             {
                 "status": "installed_in_github_environment",
-                "expires_at": m.dt.datetime.fromtimestamp(
-                    NOW + 10000, m.dt.UTC
-                ).isoformat(),
+                "expires_at": m.dt.datetime.fromtimestamp(NOW + 10000, m.dt.UTC).isoformat(),
             },
         ),
     ):
@@ -144,18 +144,11 @@ def case(tmp_path, monkeypatch):
                 return role
             if method == "POST":
                 assert endpoint == "identities/launcher/api-keys"
-                pending = m.read(
-                    tmp_path
-                    / "extra-workers"
-                    / plan["attempt"]
-                    / "launcher-key-receipt.json"
-                )
+                pending = m.read(tmp_path / "extra-workers" / plan["attempt"] / "launcher-key-receipt.json")
                 assert pending["status"] == "creation_pending"
                 return {
                     "id": "key-id",
-                    "expires_at": m.dt.datetime.fromtimestamp(
-                        NOW + 300, m.dt.UTC
-                    ).isoformat(),
+                    "expires_at": m.dt.datetime.fromtimestamp(NOW + 300, m.dt.UTC).isoformat(),
                     "api_key": "fixture-creator-key",
                 }
             assert method == "DELETE"
@@ -192,9 +185,7 @@ def case(tmp_path, monkeypatch):
     monkeypatch.setattr(m.cloud, "select_type", lambda *a: 9.58)
     monkeypatch.setattr(m.cloud, "check_allowance", lambda *a, **k: {"checked": True})
     monkeypatch.setattr(m.guarded, "verify_instances", lambda *a, **k: None)
-    monkeypatch.setattr(
-        m.guarded, "protected_coverage", lambda *a, **k: ({"checked": True}, {})
-    )
+    monkeypatch.setattr(m.guarded, "protected_coverage", lambda *a, **k: ({"checked": True}, {}))
     monkeypatch.setattr(m.guarded, "launch", guarded_launch)
     helpers = SimpleNamespace(
         audit_identity=lambda *a: ([{"role_id": role["id"]}], [role]),
@@ -250,10 +241,8 @@ def test_launch_only_writes_own_attempt_and_revokes_exact_creator(case):
     result = execute(case)
     assert result["instance_id"] == NEW
     assert "assignment" not in result
-    assert not (case.root/"extra-workers/assignments").exists()
-    assert (
-        case.pointer.read_bytes() == b"existing current pointer must remain unchanged"
-    )
+    assert not (case.root / "extra-workers/assignments").exists()
+    assert case.pointer.read_bytes() == b"existing current pointer must remain unchanged"
     assert case.calls[-1] == ("DELETE", "api-keys/key-id", None)
     folder = case.root / "extra-workers" / case.plan["attempt"]
     assert m.read(folder / "launch.json")["status"] == "launched"
@@ -300,9 +289,7 @@ def test_expired_github_cleanup_key_blocks_before_dispatch(case):
 
 @pytest.mark.parametrize("delta", [0, -1, 10801, 14400])
 def test_qualification_duration_bound(case, delta):
-    case.plan["deadline_utc"] = m.dt.datetime.fromtimestamp(
-        NOW + delta, m.dt.UTC
-    ).isoformat()
+    case.plan["deadline_utc"] = m.dt.datetime.fromtimestamp(NOW + delta, m.dt.UTC).isoformat()
     write(case.plan_path, case.plan)
     with pytest.raises(ValueError):
         execute(case)
@@ -310,16 +297,10 @@ def test_qualification_duration_bound(case, delta):
 
 
 def test_exact_three_hour_qualification_is_allowed(case):
-    case.plan["deadline_utc"] = m.dt.datetime.fromtimestamp(
-        NOW + 10800, m.dt.UTC
-    ).isoformat()
+    case.plan["deadline_utc"] = m.dt.datetime.fromtimestamp(NOW + 10800, m.dt.UTC).isoformat()
     cleanup = m.read(case.plan["github_cleanup_receipt"]["path"])
-    cleanup["expires_at"] = m.dt.datetime.fromtimestamp(
-        NOW + 20000, m.dt.UTC
-    ).isoformat()
-    case.plan["github_cleanup_receipt"] = write(
-        Path(case.plan["github_cleanup_receipt"]["path"]), cleanup
-    )
+    cleanup["expires_at"] = m.dt.datetime.fromtimestamp(NOW + 20000, m.dt.UTC).isoformat()
+    case.plan["github_cleanup_receipt"] = write(Path(case.plan["github_cleanup_receipt"]["path"]), cleanup)
     write(case.plan_path, case.plan)
     m.load_plan(case.plan_path, root=case.root, now=lambda: NOW)
     assert not case.calls
@@ -389,12 +370,27 @@ def test_actual_cli_preview_needs_no_cloud_credentials(case):
     cleanup["expires_at"] = m.dt.datetime.fromtimestamp(now + 12000, m.dt.UTC).isoformat()
     case.plan["github_cleanup_receipt"] = write(Path(case.plan["github_cleanup_receipt"]["path"]), cleanup)
     write(case.plan_path, case.plan)
-    environment = {key: value for key, value in os.environ.items()
-                   if not any(secret in key.upper() for secret in ("TOKEN", "SECRET", "ACCESS_KEY", "API_KEY"))}
-    result = subprocess.run([sys.executable, str(HERE / "replicated_preflight_launch.py"),
-                             "--plan", str(case.plan_path), "--control-root", str(case.root),
-                             "--aws-plan", str(case.root / "not-loaded-in-preview.json")],
-                            capture_output=True, text=True, env=environment, timeout=30)
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not any(secret in key.upper() for secret in ("TOKEN", "SECRET", "ACCESS_KEY", "API_KEY"))
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(HERE / "replicated_preflight_launch.py"),
+            "--plan",
+            str(case.plan_path),
+            "--control-root",
+            str(case.root),
+            "--aws-plan",
+            str(case.root / "not-loaded-in-preview.json"),
+        ],
+        capture_output=True,
+        text=True,
+        env=environment,
+        timeout=30,
+    )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["status"] == "prepared_no_calls"
     assert not (case.root / "extra-workers").exists()
@@ -419,11 +415,13 @@ def test_private_import_contract_in_fresh_process_preserves_portable_modules():
 
 def test_unknown_key_creation_result_is_not_repeated(case, monkeypatch):
     original = case.reader.request
+
     def failed(method, endpoint, body=None):
         if method == "POST":
             case.calls.append((method, endpoint, body))
             raise TimeoutError("key creation response lost")
         return original(method, endpoint, body)
+
     monkeypatch.setattr(case.reader, "request", failed)
     with pytest.raises(TimeoutError, match="key creation response lost"):
         execute(case)
@@ -439,6 +437,26 @@ def test_embedded_host_probe_compiles_and_never_starts_science():
     script = (HERE / m.WORKER_NAME).read_text()
     source = script.split("python3 - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
     compile(source, m.WORKER_NAME, "exec")
-    assert "minimum = 400 * 1024**3" in source
+    assert "minimum = expected_count * 200 * 1024**3" in source
     assert "host_observed_not_qualified" in source
     assert "train_potential.py" not in source and "evaluate_potential.py" not in source
+
+
+@pytest.mark.parametrize(("expected", "actual"), [(2, 2), (4, 4), (4, 2), (2, 4), (3, 3)])
+def test_host_probe_checks_actual_physical_gpu_count(expected, actual):
+    script = (HERE / m.WORKER_NAME).read_text()
+    source = script.split("python3 - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    function = next(
+        node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == "validate_gpus"
+    )
+    namespace = {"re": re}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), m.WORKER_NAME, "exec"), namespace)
+    rows = [f"NVIDIA H100 80GB HBM3, 81559, 580.196.07, GPU-{index:036x}, 9.0" for index in range(actual)]
+    validate = namespace["validate_gpus"]
+    if expected != actual or expected not in (2, 4):
+        with pytest.raises(AssertionError):
+            validate(rows, expected)
+    else:
+        assert len(validate(rows, expected)) == actual
+        with pytest.raises(AssertionError, match="Duplicate"):
+            validate([rows[0]] * actual, expected)

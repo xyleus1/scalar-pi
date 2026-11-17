@@ -13,6 +13,7 @@ root = Path('/lambda/nfs/scalar-pi')
 source = Path('/var/lib/scalar-pi-replica')
 attempt = os.environ['SCALAR_PI_ATTEMPT']
 deadline = float(os.environ['SCALAR_PI_DEADLINE_UNIX'])
+expected_count = int(os.environ['SCALAR_PI_EXPECTED_GPU_COUNT'])
 assert re.fullmatch(r'scalar-pi-[a-f0-9]{12}', attempt)
 assert os.geteuid() != 0
 
@@ -23,6 +24,16 @@ def capture(argv):
         raise TimeoutError('Host preflight reached its fixed stop window')
     return subprocess.run(argv, capture_output=True, text=True, check=True,
                           timeout=min(30, remaining)).stdout.strip()
+
+
+def validate_gpus(gpu, expected_count):
+    assert expected_count in (2, 4), 'Unsupported physical GPU count'
+    assert len(gpu) == expected_count, 'Physical GPU count differs from launch profile'
+    rows = [line.split(', ') for line in gpu]
+    assert all(len(row) == 5 and 'H100' in row[0] and int(row[1]) >= 80000
+               and re.fullmatch(r'GPU-[a-f0-9-]{36}', row[3]) and row[4] == '9.0' for row in rows)
+    assert len({row[3] for row in rows}) == expected_count, 'Duplicate GPU UUID'
+    return rows
 
 
 binding_path = Path('/var/lib/scalar-pi/replicated-storage/storage-binding.json')
@@ -41,24 +52,21 @@ assert binding['host']['machine_id'] == machine and binding['host']['boot_id'] =
 assert capture(['uname', '-m']) == 'x86_64'
 gpu = capture(['nvidia-smi', '--query-gpu=name,memory.total,driver_version,uuid,compute_cap',
                '--format=csv,noheader,nounits']).splitlines()
-assert len(gpu) == 2
-rows = [line.split(', ') for line in gpu]
-assert all(len(row) == 5 and 'H100' in row[0] and int(row[1]) >= 80000
-           and re.fullmatch(r'GPU-[a-f0-9-]{36}', row[3]) and row[4] == '9.0' for row in rows)
-assert len({row[3] for row in rows}) == 2
+rows = validate_gpus(gpu, expected_count)
 assert not capture(['sudo', '-n', 'docker', 'ps', '--quiet'])
 assert not capture(['nvidia-smi', '--query-compute-apps=pid', '--format=csv,noheader'])
 filesystem = os.statvfs(root)
 free_bytes = filesystem.f_bavail * filesystem.f_frsize
-minimum = 400 * 1024**3
+minimum = expected_count * 200 * 1024**3
 # Provider-advertised disk may be a separate device: inspect actual root capacity.
 # Never format or move storage in response to this failure.
-assert free_bytes >= minimum, 'Actual replica filesystem has less than 400 GiB free; inspect mounted local storage'
-assert binding['host']['ram_bytes'] >= minimum, 'Actual host RAM is below the 400 GiB admission minimum'
+assert free_bytes >= minimum, 'Replica filesystem has insufficient free space; inspect mounted local storage'
+assert binding['host']['ram_bytes'] >= minimum, 'Actual host RAM is below the profile admission minimum'
 folder = root/'data/operations/hosts'/attempt/boot/'replicated-preflight'
 folder.mkdir(parents=True, exist_ok=False)
 record = {'schema_version': 1, 'status': 'host_observed_not_qualified', 'attempt': attempt,
           'instance_id': None, 'machine_id': machine, 'boot_id': boot, 'gpu_rows': rows,
+          'expected_gpu_count': expected_count, 'physical_gpu_count': len(rows),
           'kernel': capture(['uname', '-r']), 'docker': capture(['sudo', '-n', 'docker', 'version', '--format', '{{json .}}']),
           'storage_binding': str(binding_path), 'storage_mode': 'replicated_local', 'persistence': 'ephemeral',
           'actual_free_bytes': free_bytes, 'actual_ram_bytes': binding['host']['ram_bytes'],

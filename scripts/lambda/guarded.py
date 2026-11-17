@@ -141,6 +141,9 @@ def build_body(
         f"export SCALAR_PI_DEADLINE_UNIX={deadline}\n"
         f"export SCALAR_PI_ATTEMPT={name}\n"
     )
+    if local_replica:
+        count = cloud.REPLICATED_PROFILES[(config["instance_type"], config["region"])]
+        exports += f"export SCALAR_PI_EXPECTED_GPU_COUNT={count}\n"
     if report_bytes is not None:
         if existing_checkout:
             exports += (
@@ -449,9 +452,16 @@ def launch(
             "budget_report_sha256": hashlib.sha256(report_bytes).hexdigest() if report_bytes else None,
             "launch_body_sha256": sha256(body),
             **({"parallel_admission": {"protected_cleanup": coverage, **reserves}} if coverage else {}),
-            **({"storage_mode": "replicated_local", "storage_persistence": "ephemeral",
-                "local_storage_source": "/var/lib/scalar-pi-replica", "local_storage_mount": cloud.REMOTE_ROOT}
-               if local_replica else {}),
+            **(
+                {
+                    "storage_mode": "replicated_local",
+                    "storage_persistence": "ephemeral",
+                    "local_storage_source": "/var/lib/scalar-pi-replica",
+                    "local_storage_mount": cloud.REMOTE_ROOT,
+                }
+                if local_replica
+                else {}
+            ),
         }
         state["pending_launch"] = pending
         cloud.save_state(state_path, state)
