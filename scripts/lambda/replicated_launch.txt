@@ -1,9 +1,10 @@
 Replicated local H100 host admission
 
-This controller supports three explicit launch profiles:
+This controller supports these explicit launch profiles:
   gpu_2x_h100_sxm5 / us-southeast-1
   gpu_2x_h100_sxm5 / us-south-3
   gpu_4x_h100_sxm5 / us-south-2
+  gpu_4x_h100_sxm5 / us-southeast-1
 Both config and armed request must say storage_mode="replicated_local".
 Legacy shared-storage launches keep their existing behavior and guards.
 

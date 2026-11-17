@@ -260,6 +260,7 @@ def test_launch_is_once_detached_bound_and_recorded(guarded, setup):
         ("us-southeast-1", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-3", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-2", "gpu_4x_h100_sxm5", 4, 1876),
+        ("us-southeast-1", "gpu_4x_h100_sxm5", 4, 1876),
     ],
 )
 def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(
