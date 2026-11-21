@@ -28,6 +28,7 @@ REMOTE_ROOT = "/lambda/nfs/scalar-pi"
 RESEARCH_PROFILE = ("gpu_1x_h100_pcie", "us-west-3")
 CANARY_PROFILES = {RESEARCH_PROFILE, ("gpu_1x_h100_sxm5", "us-south-2")}
 REPLICATED_PROFILES = {
+    ("gpu_8x_a100_80gb_sxm4", "us-midwest-1"): 8,
     ("gpu_2x_h100_sxm5", "us-southeast-1"): 2,
     ("gpu_2x_h100_sxm5", "us-south-3"): 2,
     ("gpu_4x_h100_sxm5", "us-south-2"): 4,
@@ -133,7 +134,7 @@ def validate_config(config):
     profile = (config["instance_type"], config["region"])
     mode = storage_mode(config)
     if mode == "replicated_local" and profile not in REPLICATED_PROFILES:
-        raise ValueError("Replicated local storage requires an explicitly admitted multi-H100 SXM profile")
+        raise ValueError("Replicated local storage requires an explicitly admitted multi-GPU SXM profile")
     if mode == "persistent_shared" and profile not in CANARY_PROFILES:
         raise ValueError("Use the research H100 PCIe profile or the canary-only H100 SXM profile")
     filesystem_name = config.get("filesystem_name", "scalar-pi")
@@ -379,7 +380,7 @@ def select_type(client, config):
         or instance_type["specs"]["gpus"] != expected_gpus
         or instance_type["architecture"] != "x86_64"
     ):
-        raise ValueError(f"Expected {expected_gpus} GPUs on an x86-64 H100 instance")
+        raise ValueError(f"Expected {expected_gpus} GPUs on an x86-64 admitted instance")
     if rate > config["max_hourly_rate_usd"]:
         raise ValueError("Current quote exceeds configured maximum; inspect and revise the cost estimate")
     if config["region"] not in {region["name"] for region in item["regions_with_capacity_available"]}:

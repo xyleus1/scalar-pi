@@ -27,11 +27,12 @@ def capture(argv):
 
 
 def validate_gpus(gpu, expected_count):
-    assert expected_count in (2, 4), 'Unsupported physical GPU count'
+    assert expected_count in (2, 4, 8), 'Unsupported physical GPU count'
     assert len(gpu) == expected_count, 'Physical GPU count differs from launch profile'
     rows = [line.split(', ') for line in gpu]
-    assert all(len(row) == 5 and 'H100' in row[0] and int(row[1]) >= 80000
-               and re.fullmatch(r'GPU-[a-f0-9-]{36}', row[3]) and row[4] == '9.0' for row in rows)
+    family, capability = ('A100-SXM4-80GB', '8.0') if expected_count == 8 else ('H100', '9.0')
+    assert all(len(row) == 5 and family in row[0] and int(row[1]) >= 80000
+               and re.fullmatch(r'GPU-[a-f0-9-]{36}', row[3]) and row[4] == capability for row in rows)
     assert len({row[3] for row in rows}) == expected_count, 'Duplicate GPU UUID'
     return rows
 

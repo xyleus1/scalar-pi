@@ -74,7 +74,7 @@ def validate_request(value, now):
     mode = value.get("storage_mode", "persistent_shared")
     if mode == "replicated_local":
         if profile not in REPLICATED_PROFILES:
-            raise ValueError("Replicated local request is outside the explicit multi-H100 profiles")
+            raise ValueError("Replicated local request is outside the explicit multi-GPU profiles")
     elif mode != "persistent_shared" or profile != RESEARCH_PROFILE:
         raise ValueError("Instance type and region must match the research profile")
     parsed = dt.datetime.fromisoformat(value["deadline_utc"].replace("Z", "+00:00"))
