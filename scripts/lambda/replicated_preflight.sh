@@ -27,11 +27,16 @@ def capture(argv):
 
 
 def validate_gpus(gpu, expected_count):
-    assert expected_count in (2, 4, 8), 'Unsupported physical GPU count'
+    assert expected_count in (1, 2, 4, 8), 'Unsupported physical GPU count'
     assert len(gpu) == expected_count, 'Physical GPU count differs from launch profile'
     rows = [line.split(', ') for line in gpu]
-    family, capability = ('A100-SXM4-80GB', '8.0') if expected_count == 8 else ('H100', '9.0')
-    assert all(len(row) == 5 and family in row[0] and int(row[1]) >= 80000
+    if expected_count == 1:
+        families, capability, minimum_memory = ('A100-PCIE-40GB', 'A100-SXM4-40GB'), '8.0', 40000
+    elif expected_count == 8:
+        families, capability, minimum_memory = ('A100-SXM4-80GB',), '8.0', 80000
+    else:
+        families, capability, minimum_memory = ('H100',), '9.0', 80000
+    assert all(len(row) == 5 and any(family in row[0] for family in families) and int(row[1]) >= minimum_memory
                and re.fullmatch(r'GPU-[a-f0-9-]{36}', row[3]) and row[4] == capability for row in rows)
     assert len({row[3] for row in rows}) == expected_count, 'Duplicate GPU UUID'
     return rows
@@ -62,7 +67,8 @@ minimum = expected_count * 200 * 1024**3
 # Provider-advertised disk may be a separate device: inspect actual root capacity.
 # Never format or move storage in response to this failure.
 assert free_bytes >= minimum, 'Replica filesystem has insufficient free space; inspect mounted local storage'
-assert binding['host']['ram_bytes'] >= minimum, 'Actual host RAM is below the profile admission minimum'
+minimum_ram = 180 * 1024**3 if expected_count == 1 else minimum
+assert binding['host']['ram_bytes'] >= minimum_ram, 'Actual host RAM is below the profile admission minimum'
 folder = root/'data/operations/hosts'/attempt/boot/'replicated-preflight'
 folder.mkdir(parents=True, exist_ok=False)
 record = {'schema_version': 1, 'status': 'host_observed_not_qualified', 'attempt': attempt,
@@ -71,7 +77,7 @@ record = {'schema_version': 1, 'status': 'host_observed_not_qualified', 'attempt
           'kernel': capture(['uname', '-r']), 'docker': capture(['sudo', '-n', 'docker', 'version', '--format', '{{json .}}']),
           'storage_binding': str(binding_path), 'storage_mode': 'replicated_local', 'persistence': 'ephemeral',
           'actual_free_bytes': free_bytes, 'actual_ram_bytes': binding['host']['ram_bytes'],
-          'minimum_free_bytes': minimum, 'minimum_ram_bytes': minimum,
+          'minimum_free_bytes': minimum, 'minimum_ram_bytes': minimum_ram,
           'recorded_unix': time.time(), 'deadline_unix': deadline,
           'bootstrap_commit': 'f53255a5965153172149546dc8eee95b2bd9b076',
           'scientific_qualification': False, 'inputs_copied': False, 'training_started': False}
