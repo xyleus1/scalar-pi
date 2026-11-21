@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: scalar-pi-lambda-watchdog
+  group: scalar-pi-lambda-watchdog-${{ fromJSON(inputs.request).instance_name }}
   cancel-in-progress: false
 
 jobs:
