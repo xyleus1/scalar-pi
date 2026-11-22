@@ -1,4 +1,5 @@
 name: Default project instance deadline
+run-name: Default ${{ inputs.instance_id }} ${{ inputs.target_sha256 }}
 on:
   workflow_dispatch:
     inputs:
