@@ -1,33 +1,54 @@
 \documentclass[10pt]{article}
 \usepackage[margin=0.85in]{geometry}
 \usepackage{amsmath,amssymb,graphicx,booktabs,array,xcolor}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage[colorlinks=true,allcolors=blue]{hyperref}
-\hypersetup{pdfauthor={Nima Kamali},pdftitle={Scalar-Potential Action Experts: A Controlled LIBERO Study}}
+\hypersetup{pdfauthor={Nima Kamali},pdftitle={Scalar-potential action experts in pi0.5}}
+\pdfinfoomitdate=1
+\pdftrailerid{}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt}
 \newcommand{\pihalf}{\pi_{0.5}}
-\newcommand{\pending}{\textcolor{gray}{Pending}}
-\title{Scalar-Potential Action Experts in a Pretrained\texorpdfstring{ $\pihalf$}{ pi0.5} Policy:\\A Controlled LIBERO Study}
+\title{Scalar-potential action experts in pi0.5}
 \author{Nima Kamali}
 \date{22 November 2026}
 \begin{document}
 \maketitle
-\input{tables/status.tex}
 \begin{abstract}
-We study a conservative output parameterization for the action expert of a pretrained vision-language-action policy. The proposed expert forms one scalar potential from the dot product of its action input and its original vector output, and uses the full input gradient as its velocity. The experiment compares the potential expert with both a pretrained-output direct-field baseline and a zero-output direct-field control. All three arms retain the same frozen vision-language backbone, action-expert architecture, data, training exposure, and numerical protocol. The fixed evaluation comprises three paired training seeds, one and ten Euler steps, and 40 LIBERO tasks with 50 initial states per task; a released policy is evaluated separately, for 40,000 episodes in total. We compare matched ten-step rollouts of the potential expert and the reset direct-field control using the same training seed, task, and initial state. We report the paired success-rate comparison and identify the observations supporting it.
+Can a scalar potential provide a useful inductive bias for a pretrained robot action expert? We adapt the action transformer of $\pihalf$ by defining $\Psi_\theta(x,t,c)=x^\top f_\theta(x,t,c)$ and using its full input gradient as the flow velocity. This adds no learned parameters, but changes the computation and constrains the field to be conservative. Nine training runs compare this expert with pretrained-output and zero-output direct-field controls under a shared frozen-backbone protocol. The complete observed grid contains 40,000 LIBERO episodes across three paired training seeds, one and ten Euler steps, and a separately evaluated released policy. At ten steps, the scalar expert achieves 91.38\% success versus 91.08\% for its matched control: a descriptive difference of +0.30 percentage points, with a paired 95\% interval of [-1.27, +1.75]. The released reference achieves 95.85\%. Unresolved cross-device numerical qualification further limits the mixed-hardware results to descriptive evidence. The study does not establish a success, smoothness, or efficiency advantage. We use its task-level variation and architectural limitations to specify five follow-up studies: trajectory supervision, predicted manipulation stages, geometric symmetry, action-conditioned future prediction, and distribution-trained convex generation.
 \end{abstract}
 
 \section{Introduction}
-Vision-language-action models combine pretrained visual and linguistic representations with an action-generating model. The $\pihalf$ system illustrates this approach at substantial scale \cite{pi05}. Here we ask a narrower question: does requiring an action expert's velocity to be the gradient of a scalar improve its behavior under a matched adaptation protocol? A conservative field is a structural constraint, not a guarantee of better optimization, better closed-loop control, or cheaper inference.
+Vision-language-action policies use pretrained perception and language representations to condition robot movements. In the $\pihalf$ family, a flow-based action expert turns a noisy action chunk into continuous commands \cite{pi05,openpi}. This separation makes the expert a natural place to study architectural constraints: its representation can change while the visual inputs, demonstrations, action processing, and downstream benchmark remain fixed. The central question is whether a more structured action field improves adaptation beyond what the original pretrained transformer already provides.
 
-Our intervention preserves the pretrained host architecture and changes the interpretation of the complete action expert's output. The reset direct-field control separates this constraint from the effect of zero-output initialization. The experiment is a frozen-backbone adaptation study, not a reproduction of full vision-language-model fine-tuning. Its primary comparison is the potential model against the reset direct field at ten Euler steps. Comparisons to the pretrained-output baseline and results at one step are secondary.
+A scalar potential offers one such constraint. If the velocity is the gradient of a twice-differentiable scalar, its Jacobian is symmetric: cross-coordinate derivatives agree at a fixed observation and transport time. This couples the action coordinates through one potential rather than learning an unrestricted vector field. The constraint is attractive because it is exact and inspectable. It also has a cost: evaluating the velocity requires an input derivative, and learning it requires differentiating through that derivative. Symmetry of this Jacobian does not imply smaller changes in physical commands, successful grasp timing, or better closed-loop trajectories.
+
+Scalar constructions are established in generative modeling and robot policies \cite{composing,energyflow,energymatching,eqm}. Our question is therefore not whether a neural scalar can generate actions, but what happens when a full pretrained $\pihalf$ action transformer is made conservative under controlled adaptation. We use a dot potential so that the original action expert remains intact. A reset direct-field baseline begins with exactly the same tensors as the scalar expert; a second direct baseline retains the pretrained output projection. These controls distinguish the scalar constraint from an initialization change. Figure~\ref{fig:comparison} locates this intervention among related constructions.
+
+The result is a small positive descriptive difference against the reset control, with uncertainty spanning zero and substantial variation across tasks. The released LIBERO checkpoint remains stronger. Moreover, some retained outputs do not satisfy the original cross-device numerical gate, so a complete set of episode records is not a fully qualified confirmatory result. Reporting these distinctions is essential: neither a favorable point estimate nor a conservative field justifies claiming an improvement in robot behavior.
+
+This paper contributes the pretrained-expert intervention, its matched initialization experiment, and a reproducible analysis of the complete observed evaluation grid. It then develops a research agenda in which each added structure has a direct control and a measurable prediction. The first proposed experiment is a direct/scalar comparison with and without trajectory reconstruction supervision. It can distinguish a better general training recipe from a benefit specific to the scalar architecture.
 
 \section{Related work}
-Flow matching learns vector fields by regression along specified probability paths \cite{flowmatching}. We retain the host policy's interpolation, target, time distribution, and Euler sampler, rather than adopting a new transport objective. The reference model and released checkpoint come from the $\pihalf$/OpenPI family \cite{pi05,openpi}.
+\subsection{Flow policies and the adaptation setting}
+Flow matching fits a vector field along a specified probability path \cite{flowmatching}. The $\pihalf$ system combines action generation with heterogeneous pretraining and hierarchical information \cite{pi05}. We study the released OpenPI LIBERO configuration, not every component of that broader system. In particular, our adaptation freezes the vision-language backbone. We retain the interpolation, regression target, transport-time distribution, and sampler, changing only the velocity parameterization. LIBERO supplies the manipulation tasks and official initial states \cite{libero}. Work on Euler integration motivates evaluating both one and ten steps on each checkpoint \cite{onestep}; fewer steps are an empirical setting, not a presumed lossless acceleration.
 
-Scalar-energy parameterizations already appear in generative modeling and robotics. Sun et al. use an input--network-output dot product to define a flow potential, derive a time-dependent energy readout, and compose it with physical structure for PDE fields \cite{composing}. We reuse that parameterization within a pretrained action transformer. EnergyFlow instead replaces a conditional U-Net's vector output with temporal pooling and a scalar MLP head; it differentiates the scalar to obtain its field and studies reward recovery under additional assumptions \cite{energyflow}. Energy Matching uses a time-independent scalar formulation \cite{energymatching}, while Equilibrium Matching studies equilibrium rather than time-conditioned transport dynamics \cite{eqm}. Our contribution is the controlled pretrained-policy adaptation and its matched initialization experiment; neither scalar robot policies nor the dot-potential construction originate here. We do not test reward recovery, physical-energy composition, or equilibrium sampling.
+\subsection{Explicit potentials and implicit energies}
+Sun et al. construct a flow potential as an input--network-output dot product and compose its associated energy with known physics for PDE fields \cite{composing}. Their field generator is a U-Net; ours is the complete pretrained action transformer. EnergyFlow uses a conditional temporal U-Net, temporal pooling, and a scalar MLP, then obtains a policy field by differentiating the scalar \cite{energyflow}. These alternatives differ in both their scalar readout and their host representation. Figure~\ref{fig:comparison} redraws their computational structure alongside OpenPI and our intervention. It is a conceptual comparison, not an empirical comparison between those implementations.
 
-LIBERO provides a robot-manipulation benchmark designed to study knowledge transfer \cite{libero}. We use the fixed four-suite, 40-task evaluation configuration stated below, not the benchmark's entire task collection. Work on Euler integration in flow policies motivates examining one-step and multi-step sampling on the same checkpoints \cite{onestep}; its empirical conclusions are not assumed to hold for our constrained expert.
+Energy Matching studies a time-independent scalar formulation \cite{energymatching}. Equilibrium Matching instead learns time-independent implicit dynamics and investigates explicit scalar variants, including dot and squared-norm constructions \cite{eqm}. Its principal implicit model should not be conflated with an exactly conservative explicit potential. Scalar-Pi retains a time-conditioned flow and the original imitation objective; it does not establish reward recovery, physical-energy composition, or equilibrium sampling. The novelty sought here is a controlled adaptation study within a pretrained VLA, not the invention of scalar policy fields.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/comparison_map.pdf}
+\caption{Original redrawing of four computational patterns, based on OpenPI, Sun et al., and EnergyFlow \cite{openpi,composing,energyflow}. Scalar-Pi preserves the pretrained action transformer and applies a full-gradient dot readout. Arrow paths denote computation, not an equivalence of objectives, training data, or performance.}
+\label{fig:comparison}
+\end{figure}
+
+\subsection{Supervision, plans, and geometric structure}
+Hermite-VLA augments $\pihalf$ with a training-only trajectory reconstruction head \cite{lv2026hermite}. Fast Plans, Faithful Actions studies whether a waypoint-based executor actually uses its plans \cite{xie2026fastplans}; $\pi_{0.7}$ also uses intermediate text and visual subgoals \cite{physicalintelligence2026pi07}. These suggest ways to address temporal structure without assuming that conservativeness supplies it. SAVLA evaluates symmetry-aware adaptation on GR00T N1.5, including a budget-matched low-data comparison \cite{li2026savla}. AnyCamVLA shows why ordinary multi-view augmentation is an essential control for viewpoint robustness \cite{heo2026anycam}. These studies motivate future controls; they are not replications of Scalar-Pi.
+
+\subsection{Predictive representation and one-step generation}
+DYNA-2 studies joint action and video modeling, including offline prediction on held-out robots \cite{dyna2}. Cosmos Policy uses a pretrained video-model architecture for robot control \cite{cosmospolicy}. A controlled SaiVLA-JEPA comparison found no detectable aggregate gain from future targets after matching current visual features \cite{saivlajepa}. Together these motivate testing action-conditioned prediction against a strong present-frame control. ESP and DriftingVLA learn one-step action generators with objectives different from conventional flow regression \cite{esp,driftingvla}. Their results motivate our proposed distributional scalar generator, but do not establish that a scalar or convex map is preferable to an unrestricted generator. Section~\ref{sec:future} states that unresolved comparison explicitly.
 
 \section{Method}
 \subsection{Full-gradient dot potential}
@@ -66,11 +87,16 @@ E_\theta(x,\tau,c)=\frac{\lVert x\rVert^2+2(1-\tau)\Psi_\theta(x,\tau,c)}{2\tau}
 This expression is singular at zero and does not by itself establish a calibrated reward or cross-context confidence score. The time-conditioned sampler is not an autonomous energy-descent procedure. No energy-based early stopping or extra refinement is introduced.
 
 \section{Experimental setup}
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/study_design.pdf}
+\caption{The completed observed evaluation design. Research arms share three training seeds; the released policy is a separate single-checkpoint reference. Each checkpoint/solver setting contains 40 tasks and 50 official starts per task. Full coverage does not imply cross-device numerical acceptance.}
+\label{fig:study}
+\end{figure}
 \subsection{Controls and training}
 \input{tables/design.tex}
 B1 and P begin with identical tensors and zero velocity. The zero projection permits its own parameters to learn immediately; a zero action-trunk gradient on the first update is expected. B0 retains the pretrained output. These controls isolate initialization from output parameterization without replacing the pretrained expert or freezing it to a small head.
 
-We completed nine training runs using the full official LIBERO training set and the base checkpoint: B0, B1, and P at seeds 17, 42, and 93. Each run completed 30,000 optimizer updates with effective batch 256, using gradient accumulation to preserve that batch size. AdamW uses $(\beta_1,\beta_2)=(0.9,0.95)$, $\epsilon=10^{-8}$, weight decay $10^{-10}$, and global gradient clipping at 1.0. The learning rate warms up linearly for 10,000 updates to $5\times10^{-5}$ and remains at that value. EMA decay is 0.999; the predeclared terminal EMA checkpoint is evaluated. Terminal checkpoint hashes establish completed training.
+We completed nine training runs using the full official LIBERO training set and the base checkpoint: B0, B1, and P at seeds 17, 42, and 93. The pinned dataset contains 1,693 demonstrations and 273,465 frames across the 40 tasks. Each run completed 30,000 optimizer updates with effective batch 256, using gradient accumulation to preserve that batch size. AdamW uses $(\beta_1,\beta_2)=(0.9,0.95)$, $\epsilon=10^{-8}$, weight decay $10^{-10}$, and global gradient clipping at 1.0. The learning rate warms up linearly for 10,000 updates to $5\times10^{-5}$ and remains at that value. EMA decay is 0.999; the predeclared terminal EMA checkpoint is evaluated. Terminal checkpoint hashes establish completed training.
 
 All research arms use the same hybrid precision protocol: the frozen vision-language backbone is BF16 except its declared FP32 embedding/normalization parameters, and the trainable action expert, optimizer, and EMA remain FP32. Execution is eager with \texttt{highest} FP32 matmul precision. Native mixed checkpoint dtypes and exact recovery checks are retained. Earlier rejected or diagnostic precision protocols are not pooled into this study.
 
@@ -91,12 +117,55 @@ The registered full-study analysis requires the entire matrix and rejects missin
 
 Uncertainty uses 10,000 paired percentile-bootstrap resamples with analysis seed 0. The same training seeds are resampled on both sides; within each fixed task, initial-state draws are shared across the sampled seeds and compared methods. Tasks and suites receive equal weight. The 95\% intervals describe training-seed and initial-state variability on this fixed benchmark, with only three training seeds. They do not establish equivalence when a contrast is nonsignificant, nor support generalization to an unobserved task distribution. Secondary contrasts are reported as such, without inventing a multiplicity-adjusted decision rule after seeing outcomes.
 
-\input{tables/support.tex}
-
-\input{tables/results.tex}
-
-\subsection{Descriptive complete-grid contrasts}
+\subsection{Complete-grid outcomes}
 The final retained grid contains 40,000 non-infrastructure episodes. All 800 selected task logs pass the unchanged original row validator and have closed execution evidence. Four initial infrastructure-failure records remain in the audit package; only their explicitly recorded retries enter these statistics. Row and lifecycle validation is distinct from cross-device numerical qualification.
+
+Figure~\ref{fig:success} separates research-seed variation from the released reference. At $K=10$, P achieves 91.38\% versus 91.08\% for B1 and 90.58\% for B0. The released reference reaches 95.85\%. At $K=1$, P reaches 93.63\%, while the released reference reaches 96.60\%, its strongest setting in this study. The scalar expert therefore does not outperform the release. These are matched-exposure research comparisons and a separately trained reference, not evidence that the released training recipe was reproduced.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/success_overview.pdf}
+\caption{Observed success across the four suites and overall, at one and ten Euler steps. Research points show individual training seeds and group means; the released checkpoint is shown separately. The seed spread is not a confidence interval. All values use the retained complete grid and are descriptive because of unresolved hardware eligibility.}
+\label{fig:success}
+\end{figure}
+
+\subsection{Paired contrasts and solver steps}
+The primary P--B1 contrast at $K=10$ is +0.30 percentage points over 6,000 matched episodes per arm, with a 95\% paired interval of [-1.27, +1.75] (Figure~\ref{fig:contrasts}). Its sign alone is not persuasive evidence of improvement, and the interval is not an equivalence test. At $K=1$, P--B1 is +0.40 points with interval [-1.18, +2.00]. Across all three research arms, the observed one-step setting exceeds the ten-step setting, but this does not establish a universal advantage for one-step flow policies. It also does not establish a scalar inference-speed advantage: its input derivative changes the cost of each field evaluation.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/contrast_intervals.pdf}
+\caption{The eight saved paired-bootstrap contrasts. Intervals use the original 10,000 resamples and random seed 0; they are not recomputed using an unpaired approximation. The primary comparison is highlighted. Secondary intervals are not multiplicity adjusted. The released checkpoint has initial-state variation only. These mixed-device estimates remain descriptive.}
+\label{fig:contrasts}
+\end{figure}
+
+\subsection{Task heterogeneity and unmeasured behavior}
+The long-horizon tasks expose variation hidden by the aggregate rate (Figure~\ref{fig:tasks}). At $K=10$, putting both moka pots on the stove succeeds in 53.3\% of scalar rollouts versus 38.0\% for the release; the reset direct control reaches 35.3\%. Conversely, placing the white mug on the left plate and the yellow-and-white mug on the right plate reaches 64.0\% for P, 73.3\% for B1, and 100\% for the release. These examples were examined after observing the results. They are exploratory, not independently selected endpoints.
+
+Even their direction can depend on solver settings: on the moka-pot task at $K=1$, P reaches 38.0\% and the release 58.0\%. Aggregate success and chosen examples therefore do not identify a general advantage on multi-stage manipulation. A timeout cannot reveal whether a policy failed to acquire the second object, misplaced it, or disturbed a previously placed object. The retained data also contain no per-step action/state traces for physical jerk, grasp timing, or replanning discontinuities. Such quantities must be measured in future rollouts; they cannot be inferred from a potential's differentiability.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/task_differences.pdf}
+\caption{Task-level descriptive differences and selected seed-level examples at ten solver steps. Research means average seeds 17, 42, and 93; the released policy is a single reference checkpoint. The two highlighted long-horizon tasks illustrate opposing outcomes, not a causal diagnosis of manipulation stages. Source arrays for all 40 tasks and both solver settings accompany the figures.}
+\label{fig:tasks}
+\end{figure}
+
+\input{future-work.tex}
+
+\section{Limitations and reporting}
+The scalar constraint may aid or hinder optimization, and its higher-order computation can increase latency. The experiment freezes the pretrained backbone and evaluates task identities represented in its training data, limiting claims about full-model adaptation and unseen-task transfer. Three training seeds provide a limited estimate of training variability. The failed A100 PCIe gate and unqualified A100 SXM4 outputs prevent a confirmatory mixed-device comparison; complete row and lifecycle validation do not repair that limitation. The proposed studies in Section~\ref{sec:future} have not been trained or evaluated here. Literature results use their authors' protocols, and are not directly ranked against this study.
+
+\section{Reproducibility}
+The scientific worker commit is \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}. The full manifest SHA-256 begins \texttt{9e2036f5f8a78258}; dataset revision is \texttt{a4336d589d589045d1c56423ffdf3b88a0e19b1f}. The release records full hashes for the manifest, methods, configurations, statistical code, and result files. The portable dataset contains 40,000 selected episodes in CSV and JSONL, 800 curated task records, effective attempt selections, checksums, and four excluded infrastructure records. Original evidence remains unchanged. No fully hardware-accepted 40,000-episode archive is asserted.
+
+The editable source includes the pinned statistical functions, a portable descriptive-analysis entrypoint, and figure-generation code. Result figures read the saved study report; their plotted values, task labels, and source digests are exported to \texttt{figure-data.json}. Conceptual diagrams are original redrawings with citations. A separate literature ledger records versions, tables, implementation details, and the distinction between published measurements and planned experiments. The expanded paper changes presentation and future-work proposals, not the selected outcomes or original analysis.
+
+\section{Conclusion}
+The full-gradient dot potential is a small architectural change with a substantial computational consequence. In the completed observed grid, it yields +0.30 percentage points over its reset direct-field control at ten Euler steps, with a descriptive 95\% interval of [-1.27, +1.75]. This study does not establish an improvement over that control or the released $\pihalf$ policy. Its useful result is a precise comparison and a set of testable next steps. Trajectory supervision is the first proposed experiment; geometric invariance and convex distributional transport offer more explicit reasons for scalar structure to matter, provided they beat matched direct alternatives.
+
+\clearpage
+\appendix
+\section{Complete counts and paired contrasts}
+\input{tables/support.tex}
+\input{tables/results.tex}
 \begin{table}[htbp]\centering\small
 \begin{tabular}{llrrr}\toprule
 Contrast & Endpoint & Pairs & Difference & 95\% interval \\ \midrule
@@ -111,28 +180,18 @@ Released $K=1$ minus Released $K=10$ & Secondary & 2,000 & +0.75 & [-0.15, +1.70
 \bottomrule\end{tabular}
 \caption{Descriptive paired success-rate differences on the complete observed grid, in percentage points. The original paired-bootstrap calculation uses 10,000 resamples and random seed 0. Secondary intervals are not adjusted for multiple comparisons. The released policy has one checkpoint, so its interval describes paired initial-state variation rather than training-seed replication. Unresolved hardware eligibility prevents interpreting these intervals as the registered confirmatory analysis.}
 \label{tab:descriptive-contrasts}\end{table}
-% Descriptive report SHA256: a99687a59715cba9fe7ed2ffeab9a6825896e3719a57967e34d7b39eb9a6db9c
 
+\clearpage
+\section{All-task descriptive comparisons}
+\begin{figure}[htbp]
+\centering\includegraphics[width=\linewidth,height=.83\textheight,keepaspectratio]{figures/task_heatmap_all.pdf}
+\caption{All 40 tasks at both solver settings. Each research value averages the three training seeds. The released policy remains a separate checkpoint, and all differences are descriptive. This complete view supplements the selected long-horizon examples rather than treating them as representative of every task.}
+\label{fig:alltasks}
+\end{figure}
 
-The descriptive 95\% interval for this difference was [-1.27, +1.75] percentage points. These mixed-hardware observations do not establish a confirmatory benefit under the registered numerical-eligibility criteria.
-
-\section{Limitations and reporting}
-The scalar constraint may aid or hinder optimization, and its higher-order computation can increase latency. A mathematically conservative field does not imply improved robot success. The study uses a frozen pretrained backbone and tasks represented in its training data, limiting claims about full-model adaptation and new-task transfer. Three training seeds provide a limited estimate of training variability. The retained A100 PCIe fixed-input capture failed the predeclared H100 numerical gate, and A100 SXM4 rollouts lack accepted cross-H100 qualification. Statistics combining these producers describe observed outcomes and do not establish the predeclared confirmatory comparison. Matching task placement by hardware where possible reduces, but does not eliminate, this concern. Complete row and lifecycle validation does not substitute for numerical qualification. Timing measurements remain stratified by hardware.
-
-The final selected grid is complete: every checkpoint, solver-step, task and initial-state identity is present exactly once. The 16,000 episodes marked as phase validated refer to the original accepted phase archives; all 40,000 selected rows have separate task-validation and closed-lifecycle evidence. The distinction is retained rather than upgrading hardware eligibility from successful execution.
-
-\section{Reproducibility}
-The study's frozen worker commit is \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}; the full manifest SHA-256 begins \texttt{9e2036f5f8a78258}. The reproducibility index records full hashes for the manifest, methods and configuration sources, analysis entrypoint, and finalization interfaces. The retained evidence distinguishes original accepted phase archives, task-level row and lifecycle validation, and hardware qualification. No fully accepted 40,000-episode archive is asserted while hardware eligibility remains unresolved.
-
-The portable dataset contains the 40,000 selected episodes in CSV and JSONL, 800 curated task records with source digests and scientific provenance, the effective attempt selections, checksums, and four excluded infrastructure records. Private identifiers and paths are omitted; original evidence is unchanged. The editable source package includes the original pinned statistical functions and a portable descriptive-analysis entrypoint. The eight contrasts reuse the original estimator on the complete observed grid without asserting hardware qualification.
-
-\section{Conclusion}
-\input{tables/conclusion.tex}
-
-
+\clearpage
 \begingroup\footnotesize\setlength{\parskip}{0pt}
-\enlargethispage{2\baselineskip}
-\bibliographystyle{plain}
+\bibliographystyle{plainnat}
 \bibliography{references}
 \endgroup
 \end{document}

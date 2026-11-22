@@ -1,21 +1,21 @@
 cff-version: 1.2.0
 message: "Please cite this paper when using Scalar-Pi or its released results."
 type: software
-title: "Scalar-Pi: Scalar-Potential Action Experts in a Pretrained pi0.5 Policy"
+title: "Scalar-potential action experts in pi0.5"
 authors:
   - family-names: Kamali
     given-names: Nima
-version: 0.1.0
+version: 0.2.0
 date-released: 2026-11-22
 repository-code: "https://github.com/xyleus1/scalar-pi"
 license: Apache-2.0
 preferred-citation:
   type: report
-  title: "Scalar-Potential Action Experts in a Pretrained pi0.5 Policy: A Controlled LIBERO Study"
+  title: "Scalar-potential action experts in pi0.5"
   authors:
     - family-names: Kamali
       given-names: Nima
   year: 2026
-  version: 0.1.0
-  url: "https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.0"
+  version: 0.2.0
+  url: "https://github.com/xyleus1/scalar-pi/releases/tag/v0.2.0"
   license: CC-BY-4.0

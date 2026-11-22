@@ -18,6 +18,7 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, "build_assets.py"], cwd=HERE, check=True)
+    subprocess.run([sys.executable, "expanded_figures.py"], cwd=HERE, check=True)
     tex = ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-output-directory=build/tex", "manuscript.tex"]
     for command in (tex, ["bibtex", "build/tex/manuscript"], tex, tex):
         subprocess.run(command, cwd=HERE, check=True)

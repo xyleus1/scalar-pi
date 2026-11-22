@@ -2,7 +2,7 @@ name: Research CPU tests
 
 on:
   push:
-    branches: [main, cleanup/research-release]
+    branches: [main, cleanup/research-release, paper/expanded-study]
   pull_request:
   workflow_dispatch:
 

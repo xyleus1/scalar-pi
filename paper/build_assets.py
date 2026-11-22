@@ -56,7 +56,11 @@ def design():
         arrowprops={"arrowstyle": "->", "lw": 1.4, "connectionstyle": "angle,angleA=0,angleB=90,rad=5"},
     )
     ax.text(8.9, 0.48, r"$f_\theta+J_{f_\theta}^{\top}x$", ha="center", fontsize=12)
-    fig.savefig(HERE / "figures/method.pdf", bbox_inches="tight")
+    fig.savefig(
+        HERE / "figures/method.pdf",
+        bbox_inches="tight",
+        metadata={"Author": "Nima Kamali", "CreationDate": None, "ModDate": None},
+    )
     fig.savefig(HERE / "figures/method.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
     (HERE / "tables/design.tex").write_text(r"""\begin{table}[t]
@@ -123,11 +127,9 @@ def current_results():
     fig.savefig(HERE / "figures/coverage.png", dpi=170)
     plt.close(fig)
     lines = [
-        r"\paragraph{Observed outcomes.} At "
-        + current["as_of_utc"]
-        + ", the retained results contained "
-        + f"{current['distinct_episodes']:,} distinct original episodes. Table~\\ref{{tab:observed}} "
-        + "shows the success counts for every checkpoint and inference-step combination with reported outcomes.",
+        r"\paragraph{Observed outcomes.} The retained results contain "
+        f"{current['distinct_episodes']:,} distinct original episodes. Table~\\ref{{tab:observed}} "
+        "shows the success counts for every checkpoint and inference-step combination with reported outcomes.",
         r"\begin{table}[htbp]\centering\begin{tabular}{lrrr}\toprule",
         r"Checkpoint & Euler steps & Successful / observed & Phase validated \\ \midrule",
     ]
@@ -157,7 +159,7 @@ def current_results():
         "The descriptive interval below reuses the original bootstrap; a hardware-qualified confirmatory interval is not asserted.",
     )
     (HERE / "tables/support.tex").write_text(support + "\n", encoding="utf-8")
-    return r"\begin{center}\small Evaluation snapshot of " + current["as_of_utc"] + r".\end{center}"
+    return r"\begin{center}\small Study results, 22 November 2026.\end{center}"
 
 
 if __name__ == "__main__":

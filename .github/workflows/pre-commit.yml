@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - cleanup/research-release
+      - paper/expanded-study
   pull_request:
     branches:
       - "*"

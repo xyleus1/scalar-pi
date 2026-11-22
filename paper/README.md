@@ -46,7 +46,7 @@ were recorded.
 ## Build the PDF
 
 Install a TeX distribution providing `pdflatex` and `bibtex`, with geometry,
-amsmath, amssymb, graphicx, booktabs, array, xcolor and hyperref. Then:
+amsmath, amssymb, graphicx, booktabs, array, xcolor, natbib and hyperref. Then:
 
 ```bash
 python -m pip install -r paper/requirements-render.txt

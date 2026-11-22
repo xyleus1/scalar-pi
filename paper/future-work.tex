@@ -1,0 +1,118 @@
+\section{Five planned architectural studies}
+\label{sec:future}
+The following studies are proposals, not completed Scalar-Pi experiments. Each introduces a specific architectural or learning change and an equally trained direct counterpart. Figure~\ref{fig:future} summarizes the changes; Figure~\ref{fig:literature} shows selected within-paper comparisons motivating them. The external results use different models and evaluation protocols and cannot be read as a common leaderboard.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/future_studies.pdf}
+\caption{Five proposed studies. Training-only prediction heads are removed at deployment; waypoint conditioning, invariant geometry, and convex generation change the deployed policy. These diagrams specify future experiments, not implemented or evaluated extensions of v1.}
+\label{fig:future}
+\end{figure}
+
+\subsection{Reconstruct the shape of a demonstrated movement}
+\label{sec:trajectory}
+\paragraph{Architecture and objective.}
+Retain the scalar flow loss and attach a small head to pooled action-expert hidden features. It predicts the coefficients of two cubic Hermite segments for each of the six continuous arm controls across the ten-action chunk. With fixed segment intervals, a segment is
+\begin{equation}
+q(s)=(2s^3-3s^2+1)p_0+(s^3-2s^2+s)m_0+(-2s^3+3s^2)p_1+(s^3-s^2)m_1,
+\quad s\in[0,1],
+\end{equation}
+where $p_0,p_1$ and $m_0,m_1$ are predicted endpoint values and segment-scaled tangents of an arm-command coordinate. Decode these coefficients at the ten fixed command times and train with
+\begin{equation}
+\mathcal L=\mathcal L_{\rm flow}+10\,\operatorname{MSE}(\widehat A_{\rm arm},A_{\rm arm}).
+\end{equation}
+Gripper supervision remains unchanged. Reconstruction is auxiliary: commands at deployment still come from the action expert, and the head is removed. This encourages hidden features to describe trajectory shape without constraining every deployed action to the cubic family.
+
+The released Hermite-VLA regression head provides a concrete implementation: a biased $1024\!\to\!512\!\to\!512\!\to\!48$ MLP, with $48=2\times4\times6$ coefficients \cite{lv2026hermitecode}. It adds 812,080 learned parameters by layer-shape arithmetic. Relative to the 430,098,464-parameter action-expert/projection scope counted analytically from our configuration, this is approximately 0.189\%. These are proposed architecture counts, not a measurement of an implemented follow-up checkpoint. Independent segment endpoints also do not guarantee continuity at their join; join error should be measured, with shared-endpoint constraints treated as a separate ablation.
+
+\paragraph{Evidence and decisive comparison.}
+Hermite-VLA reports 95.9\% to 98.7\% overall and 91.4\% to 96.8\% on Long using $\pihalf$, ten predicted actions, five-action replanning, 30,000 updates, and batch 256. A one-cubic-segment ablation reaches 93.7\%, below its baseline \cite{lv2026hermite}. Thus the specific supervision matters. We will cross direct/scalar experts with no auxiliary loss, two-segment Hermite reconstruction, and an equally sized cosine-basis head. Match hidden-feature access, coefficient count, loss normalization, and training exposure. Fit both bases to held-out demonstration chunks first to quantify representation error without using evaluation episodes. Compare closed-loop success, gripper-event timing, within-chunk roughness, and command discontinuities at replanning boundaries using newly recorded traces. Equal gains for direct and scalar experts support a better training recipe; an additional scalar gain over the equally supervised direct expert supports the scalar hypothesis.
+
+\subsection{Predict the next manipulation stage}
+\paragraph{Architecture and labels.}
+Add the robot state already available in the demonstrations and a short history of past observed states. A predictor reads images, instruction, and that causal history, and outputs the next gripper-event type, end-effector pose at that event, and time remaining. Use the terminal demonstrated pose when no further event occurs, with an explicit no-further-event label. Generate labels from each demonstration using a fixed gripper-event extraction rule; fit normalization and choose thresholds on training/development data. At deployment the future label is unavailable: several action-expert layers are conditioned on the predicted waypoint. Record the history length, event rule, pose frame, and conditioning locations as part of the new protocol.
+
+The opposing moka-pot and mug results in Section~5 motivate stage-resolved measurement, but do not establish stage prediction as their cause. The simulator can supply separate outcomes for first-object placement, second-object acquisition, and retention of both objects at their targets. We will record these events in new evaluations instead of inferring them from timeout records.
+
+\paragraph{Evidence and decisive comparison.}
+Fast Plans, Faithful Actions improves its own $\pihalf$-based waypoint hierarchy from 95.85\% to 98.45\% overall and 91.0\% to 96.2\% on Long; the comparison changes Block-AR with a suffix adapter to Block-AR with the NGM design, including its phase gate, noise, and dropout, so the gain does not isolate stage prediction \cite{xie2026fastplans}. The $\pi_{0.7}$ report uses intermediate instructions and visual subgoals \cite{physicalintelligence2026pi07}. We will compare state alone, state plus history, and state plus history plus predicted waypoint, giving direct and scalar experts identical inputs. On development resets, erase or swap predicted waypoints and test whether execution responds as intended. Oracle demonstration waypoints may diagnose a prediction bottleneck, but must not be pooled with deployable results. This separates useful planning information from extra state access or an ignored auxiliary head.
+
+\subsection{Impose a geometric symmetry on the potential}
+\paragraph{Architecture and conditional guarantee.}
+Express continuous arm commands in calibrated gripper-relative coordinates. For axes mixed by tabletop yaw, use equal normalization scales; leave the gripper command invariant. Let $R$ denote an orthogonal block action on the translated/rotational command representation, and write $T_R c$ for the corresponding transformation of geometric and semantic context. Construct an invariant potential satisfying
+\begin{equation}
+\Psi_\theta(Rx,t,T_Rc)=\Psi_\theta(x,t,c).
+\end{equation}
+Differentiation with respect to $x$ gives
+\begin{equation}
+R^\top\nabla_{Rx}\Psi_\theta(Rx,t,T_Rc)=\nabla_x\Psi_\theta(x,t,c),
+\qquad
+\nabla_{Rx}\Psi_\theta(Rx,t,T_Rc)=R\nabla_x\Psi_\theta(x,t,c).
+\end{equation}
+The implication is exact where the potential is differentiable and the representation is orthogonal. The current unconstrained dot potential does not already satisfy the premise. An invariant geometric network, or averaging a scalar over a specified finite rotation group, supplies a concrete construction. Finite-group averaging is exact only for that group and incurs multiple evaluations unless its computation is shared.
+
+Passive coordinate re-expression is distinct from rotating a physical scene or moving a camera. In a gripper-relative frame, simultaneous world rotation may leave local commands unchanged rather than applying the same $R$ again. Calibrated transforms must therefore define which coordinates each group acts on. Raw VLM image features are not automatically equivariant geometric context; use a representation with a defined transformation law or restrict the claim to the geometric branch. A whole-potential guarantee requires every action-dependent path and transformed condition to satisfy the invariance; a single invariant branch is insufficient. The noise law and sampler must also respect the group for a distributional policy-equivariance claim. Occlusion, changed layouts, and language such as ``left plate'' require separate treatment and empirical tests.
+
+\paragraph{Evidence and decisive comparison.}
+SAVLA reports 57.1\% versus 48.3\% at 10\% data on a budget-matched, reduced GR00T N1.5 action-head comparison; it is not a $\pihalf$ result \cite{li2026savla}. In AnyCamVLA v3, plain $\pihalf$ reaches 69.9\% novel-agent-view success, a multi-view-augmented control reaches 87.2\%, and AnyCamVLA reaches 94.5\% \cite{heo2026anycam}. We will compare ordinary augmentation, a direct expert with the same relative coordinates, an explicitly equivariant direct expert, and an invariant scalar expert. Use identical nested demonstration budgets and calibrated rerenders of the same source trajectories, with source trajectories kept in one split. Evaluate success by data budget and held-out viewpoint, plus numerical equivariance error. Any scalar-specific data-efficiency claim must survive both the augmentation and equivariant-direct controls.
+
+\subsection{Predict what the next five actions will change}
+\paragraph{Architecture and objective.}
+During training, a small predictor takes the current scene representation and the five demonstrated actions that would be executed before replanning. A frozen copy of the public image encoder provides targets
+\begin{equation}
+\Delta e_t=\operatorname{stopgrad}\bigl(e(I_{t+5})-e(I_t)\bigr).
+\end{equation}
+The predictor regresses this change, and its gradients update the policy representation shared with action generation. Use within-episode aligned images and action prefixes; exclude windows crossing episode boundaries. Only the policy remains at deployment. Unlike v1's frozen backbone, this study requires an explicit decision about which conditioning layers receive gradients, applied equally to every control.
+
+\paragraph{Evidence and decisive comparison.}
+DYNA-2 reports better held-out-robot prediction with video modeling across 39 tasks, an offline prediction comparison \cite{dyna2}. Cosmos Policy separately reports 98.5\% LIBERO success with a pretrained video-model architecture \cite{cosmospolicy}. More directly cautionary evidence comes from SaiVLA-JEPA: its 10,030 paired LIBERO-Plus episodes under a matched 300-step cap yield 78.97\% versus 79.00\%, a +0.03-point future-supervision difference with interval [-0.73, +0.77] \cite{saivlajepa}. These are different tests, not interchangeable evidence for a control benefit.
+
+Compare current-frame supervision, true action-conditioned future-change supervision, and shuffled futures from the same task, with matched trainable capacity and training cost. From identical simulator states, swap action prefixes and test whether predicted changes follow the actual counterfactual outcomes. Improved feature prediction alone is insufficient: advance this architecture only if it also improves closed-loop success over the current-frame control. Evaluate whether any gain differs between matched direct and scalar experts.
+
+\subsection{Learn a distribution-trained convex scalar generator}
+\label{sec:convex}
+\paragraph{Why change the objective?}
+For the v1 path $x_t=(1-t)A+t\epsilon$, the ideal squared-error regressor at pure noise satisfies
+\begin{equation}
+v^*(z,1,c)=z-\mathbb E[A\mid c],\qquad z-v^*(z,1,c)=\mathbb E[A\mid c].
+\end{equation}
+This identity assumes independent noise and an endpoint regression value, or a sufficiently regular extension of the population solution to $t=1$. The continuous-time training distribution gives that endpoint zero probability, so the identity is not a guarantee about a finite learned network. It applies to the ideal direct regression objective too; it is not a scalar-specific failure. It nevertheless motivates changing the distributional training target when multiple valid movements should survive a single generation step. Multi-step conservative transport can still represent multimodal distributions.
+
+\paragraph{Architecture and loss.}
+First sample a categorical ten-step gripper schedule $G\sim p_\theta(G\mid c)$. Condition a scalar network on the scene and this schedule, sample $z\sim\mathcal N(0,I_{60})$, and generate the six continuous arm commands at ten times as
+\begin{equation}
+\widehat A=\nabla_z\Phi_\theta(z,c,G),\qquad \Phi_\theta(\cdot,c,G)\ \text{convex in }z.
+\end{equation}
+An input-convex network supplies a concrete parameterization: nonnegative hidden-to-hidden weights, convex nondecreasing activations, and affine noise skip paths preserve convexity in noise \cite{icnn}. Context may parameterize affine terms and constrained weights, but must not break that convexity. A nonconvex conditioning encoder is permissible. Train gripper schedules with categorical log loss and arms with the multivariate energy score,
+\begin{equation}
+\mathcal L_{\rm ES}=\mathbb E\lVert\widehat A-A\rVert_2
+-\tfrac12\mathbb E\lVert\widehat A-\widehat A'\rVert_2,
+\end{equation}
+using independent noise draws for $\widehat A,\widehat A'$ under the same $(c,G)$, independent of the target $A$ conditional on that context. Joint gripper/arm learning should use the demonstrated schedule for the conditional arm target, then evaluate sampled schedules at deployment. Audit gripper-switch counts on the training demonstrations before restricting schedule support. Retain a richer schedule model if multi-switch chunks are present.
+
+\paragraph{What the scalar structure guarantees.}
+The energy score is strictly proper for distributions with finite first moments \cite{gneitingraftery2007}. At the population optimum of a sufficiently expressive conditional family, it identifies the target conditional distribution. For a Gaussian source and a target with finite second moments, quadratic-cost optimal transport selects an almost-everywhere unique map that is a gradient of a convex potential \cite{brenier1991,mccann1995}. Thus, if the learned convex gradient actually pushes the source to the desired conditional target, it selects that transport map. This does not guarantee that a finite input-convex network can represent the target, that optimization finds it, or that robot success improves. Discrete or singular targets may require nonsmooth convex potentials or limiting approximations; imposing strong convexity changes that expressive scope.
+
+\paragraph{Evidence and decisive comparison.}
+ESP reports 91.8\% one-step success versus 89.1\% for its ten-step flow baseline; widening ESP raises success to 93.7\% and expert latency from 3.35 to 21.15 ms \cite{esp}. Those latency endpoints compare narrow and wide ESP, not flow and ESP. DriftingVLA reports 98.32\% versus 97.10\% with full-model adaptation and a fresh action head; its frozen-VLM expert-only variant reaches 94.57\% \cite{driftingvla}. These protocols differ from v1. Give an unrestricted direct generator the same gripper head, energy-score loss, independent noise pairs, initialization resources, and training budget. First test both generators for Gaussian target-distribution agreement and the convex generator for agreement with the analytic quadratic-cost Gaussian transport map; the unrestricted generator need not identify that coupling. Then evaluate robot success, distributional calibration, and end-to-end latency including the scalar input derivative. Only the matched direct comparison can show what convex transport adds.
+
+\begin{figure}[t]
+\centering\includegraphics[width=\linewidth]{figures/literature_evidence.pdf}
+\caption{Selected results reported within six external studies \cite{lv2026hermite,xie2026fastplans,esp,driftingvla,li2026savla,heo2026anycam}. Each panel preserves its authors' local comparison. Architectures, data, checkpoint selection, backbone updates, and evaluation protocols differ across panels. This is evidence motivating controls, not a cross-paper leaderboard or new Scalar-Pi measurement.}
+\label{fig:literature}
+\end{figure}
+
+\section{A confirmation protocol for the next study}
+\label{sec:confirmation}
+\paragraph{Match the competitors.}
+Start fresh students from public \texttt{pi05\_base}; separately rerun \texttt{pi05\_libero} with its own normalization. Train a competitive full-model direct $\pihalf$ control and a scalar counterpart with matched initialization, inputs, supervision, and backbone updates. Enabling conditioning-backbone gradients is a change from v1 and must be tested in the trainer before making this comparison. Keep ten predicted actions, five executed actions, original task limits, paired resets and noise, and one qualified hardware family. Report both one and ten solver steps for flow policies; evaluate endpoint generators with their native single call. The release's 96.60\% one-step result in v1 is a reference to exceed, not an assumed future baseline score. Report success at matched update exposure and separately account for GPU-hours, memory, and end-to-end inference cost.
+
+\paragraph{Select once, then confirm.}
+Screen architectural choices on development resets. Replay the official 40 tasks $\times$ 50 initial states for comparability, then evaluate the selected finalist on a sealed draw from the same task-reset distributions. Budget ten paired training seeds and 100 fresh starts per task for the finalist, increasing the budget if pilot variance warrants it; this is a planning allocation, not a demonstrated power guarantee. The official release supplies only 50 fixed starts per task: obtaining 100 fresh starts requires an independent sampler from the task-reset distribution, not cycling those 50. Pin that sampler and its validity rules, generate and hash the sealed states before policy comparison, and report the sampling procedure. Define validity independently of policy outcomes. Use paired intervals over training seeds and shared starts, and keep tasks as the fixed target benchmark unless a broader sampling claim is justified. Predeclare a practical win as an estimated gain of at least one percentage point with a 95\% lower bound above zero. Claiming that the true gain itself exceeds one point requires that lower bound to exceed one point.
+
+Use corrected LIBERO-Plus as a separate robustness test \cite{liberoplus,lajepa}. Pin the corrected prompts: non-language variants retain the base task instruction, while intentional language perturbations remain distinct. Preserve the benchmark's valid reset identities and record exclusions before policy comparison. Do not silently mix episode caps or discard failed outcomes. This protocol is a future confirmation study; it does not retroactively qualify v1's mixed-hardware results.
+
+\paragraph{Make data efficiency a separate endpoint.}
+Use nested budgets of 5, 10, 20, and all demonstrations per task: 200, 400, 800, and 1,693 demonstrations in total. Share episode selections and subset-fitted normalization between competitors; split by whole demonstrations before constructing overlapping chunks. Plot success against both unique demonstrations and GPU-hours. If a 400-demo candidate beats the 400-demo direct model and the lower confidence bound against the 1,693-demo direct model exceeds $-1$ point under a predeclared noninferiority comparison, it supports comparable success within that margin using $1693/400=4.23$ times fewer downstream demonstrations. This is adaptation efficiency from a shared public pretrained base, not a claim about total pretraining-data requirements.
+
+\paragraph{First experiment.}
+Begin with the direct/scalar $\times$ trajectory-loss design in Section~\ref{sec:trajectory}, including the cosine-basis control. It answers whether the auxiliary loss improves the direct policy, whether scalar structure adds anything under that same loss, and whether either effect changes with demonstration count. Record the direct/scalar difference within every supervision condition and the difference between those effects. That interaction is more informative than comparing a newly augmented scalar model only with an unaugmented baseline.
