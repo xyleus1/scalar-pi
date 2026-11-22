@@ -132,6 +132,10 @@ def metadata(value):
     result = pick(value, METADATA)
     if "runtime" in value:
         result["runtime"] = pick(value["runtime"], RUNTIME)
+        if "devices" in value["runtime"]:
+            result["runtime"]["devices"] = [
+                pick(device, ("device", "kind", "platform")) for device in value["runtime"]["devices"]
+            ]
     if isinstance(value.get("research"), dict):
         result["research"] = pick(value["research"], RESEARCH)
     elif "research" in value:

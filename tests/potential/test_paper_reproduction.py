@@ -88,6 +88,11 @@ class PublicPaperTests(unittest.TestCase):
         BUILDER.clean(public)
         released = BUILDER.metadata({"research": None, "runtime": {"backend": "jax"}})
         assert released == {"research": None, "runtime": {"backend": "jax"}}
+        devices = [{"device": "cuda:0", "kind": "NVIDIA A100-SXM4-40GB", "platform": "gpu", "uuid": "private"}]
+        released = BUILDER.metadata({"research": None, "runtime": {"backend": "jax", "devices": devices}})
+        assert released["runtime"]["devices"] == [
+            {"device": "cuda:0", "kind": "NVIDIA A100-SXM4-40GB", "platform": "gpu"}
+        ]
         with pytest.raises(ValueError, match="Private metadata"):
             BUILDER.clean({"instance_id": "private"})
         with pytest.raises(ValueError, match="Private metadata"):
