@@ -144,6 +144,8 @@ def build_body(
     if local_replica:
         count = cloud.REPLICATED_PROFILES[(config["instance_type"], config["region"])]
         exports += f"export SCALAR_PI_EXPECTED_GPU_COUNT={count}\n"
+        if config["instance_type"] == "gpu_1x_h100_sxm5":
+            exports += "export SCALAR_PI_EXPECTED_INSTANCE_TYPE=gpu_1x_h100_sxm5\n"
     if report_bytes is not None:
         if existing_checkout:
             exports += (

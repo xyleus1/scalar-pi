@@ -442,8 +442,7 @@ def test_embedded_host_probe_compiles_and_never_starts_science():
     assert "train_potential.py" not in source and "evaluate_potential.py" not in source
 
 
-@pytest.mark.parametrize(("expected", "actual"), [(2, 2), (4, 4), (4, 2), (2, 4), (3, 3)])
-def test_host_probe_checks_actual_physical_gpu_count(expected, actual):
+def host_gpu_validator():
     script = (HERE / m.WORKER_NAME).read_text()
     source = script.split("python3 - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
     function = next(
@@ -451,8 +450,13 @@ def test_host_probe_checks_actual_physical_gpu_count(expected, actual):
     )
     namespace = {"re": re}
     exec(compile(ast.Module(body=[function], type_ignores=[]), m.WORKER_NAME, "exec"), namespace)
+    return namespace["validate_gpus"]
+
+
+@pytest.mark.parametrize(("expected", "actual"), [(2, 2), (4, 4), (4, 2), (2, 4), (3, 3)])
+def test_host_probe_checks_actual_physical_gpu_count(expected, actual):
     rows = [f"NVIDIA H100 80GB HBM3, 81559, 580.196.07, GPU-{index:036x}, 9.0" for index in range(actual)]
-    validate = namespace["validate_gpus"]
+    validate = host_gpu_validator()
     if expected != actual or expected not in (2, 4):
         with pytest.raises(AssertionError):
             validate(rows, expected)
@@ -460,3 +464,26 @@ def test_host_probe_checks_actual_physical_gpu_count(expected, actual):
         assert len(validate(rows, expected)) == actual
         with pytest.raises(AssertionError, match="Duplicate"):
             validate([rows[0]] * actual, expected)
+
+
+def test_single_sxm_watchdog_and_gpu_binding(case):
+    config = m.read(Path(case.plan["config"]["path"]))
+    config.update(instance_type="gpu_1x_h100_sxm5", max_hourly_rate_usd=4.89)
+    case.plan["config"] = write(Path(case.plan["config"]["path"]), config)
+    write(case.plan_path, case.plan)
+    _, _, _, _, request = m.load_plan(case.plan_path, root=case.root, now=lambda: NOW)
+    assert request["instance_type"] == "gpu_1x_h100_sxm5"
+    assert request["region"] == "us-southeast-1" and request["storage_mode"] == "replicated_local"
+    for mismatch in ({"region": "us-south-2"}, {"storage_mode": "persistent_shared"}):
+        with pytest.raises(ValueError):
+            m.validate_request({**request, **mismatch}, NOW)
+
+    validate = host_gpu_validator()
+    h100 = [f"NVIDIA H100 80GB HBM3, 81559, 580.196.07, GPU-{0:036x}, 9.0"]
+    a100 = [f"NVIDIA A100-SXM4-40GB, 40536, 580.196.07, GPU-{0:036x}, 8.0"]
+    assert validate(h100, 1, request["instance_type"])
+    assert validate(a100, 1)
+    with pytest.raises(AssertionError):
+        validate(a100, 1, request["instance_type"])
+    with pytest.raises(AssertionError):
+        validate(h100, 1)

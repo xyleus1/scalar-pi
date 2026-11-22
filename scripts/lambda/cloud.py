@@ -32,6 +32,7 @@ REPLICATED_PROFILES = {
     ("gpu_1x_a100_sxm4", "us-east-1"): 1,
     ("gpu_1x_a100_sxm4", "us-west-2"): 1,
     ("gpu_8x_a100_80gb_sxm4", "us-midwest-1"): 8,
+    ("gpu_1x_h100_sxm5", "us-southeast-1"): 1,
     ("gpu_2x_h100_sxm5", "us-southeast-1"): 2,
     ("gpu_2x_h100_sxm5", "us-south-3"): 2,
     ("gpu_4x_h100_sxm5", "us-south-2"): 4,

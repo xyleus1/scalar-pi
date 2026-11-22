@@ -26,11 +26,14 @@ def capture(argv):
                           timeout=min(30, remaining)).stdout.strip()
 
 
-def validate_gpus(gpu, expected_count):
+def validate_gpus(gpu, expected_count, instance_type=None):
     assert expected_count in (1, 2, 4, 8), 'Unsupported physical GPU count'
     assert len(gpu) == expected_count, 'Physical GPU count differs from launch profile'
     rows = [line.split(', ') for line in gpu]
-    if expected_count == 1:
+    if instance_type is not None:
+        assert instance_type == 'gpu_1x_h100_sxm5' and expected_count == 1, 'Unexpected single H100 binding'
+        families, capability, minimum_memory = ('H100',), '9.0', 80000
+    elif expected_count == 1:
         families, capability, minimum_memory = ('A100-PCIE-40GB', 'A100-SXM4-40GB'), '8.0', 40000
     elif expected_count == 8:
         families, capability, minimum_memory = ('A100-SXM4-80GB',), '8.0', 80000
@@ -58,7 +61,7 @@ assert binding['host']['machine_id'] == machine and binding['host']['boot_id'] =
 assert capture(['uname', '-m']) == 'x86_64'
 gpu = capture(['nvidia-smi', '--query-gpu=name,memory.total,driver_version,uuid,compute_cap',
                '--format=csv,noheader,nounits']).splitlines()
-rows = validate_gpus(gpu, expected_count)
+rows = validate_gpus(gpu, expected_count, os.environ.get('SCALAR_PI_EXPECTED_INSTANCE_TYPE'))
 assert not capture(['sudo', '-n', 'docker', 'ps', '--quiet'])
 assert not capture(['nvidia-smi', '--query-compute-apps=pid', '--format=csv,noheader'])
 filesystem = os.statvfs(root)
