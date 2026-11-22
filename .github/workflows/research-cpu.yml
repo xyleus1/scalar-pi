@@ -1,0 +1,55 @@
+name: Research CPU tests
+
+on:
+  push:
+    branches: [main, cleanup/research-release]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-cpu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research-cpu:
+    name: Scientific tests (CPU, Python 3.11.9)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
+      UV_LINK_MODE: copy
+      CUDA_VISIBLE_DEVICES: ""
+      JAX_PLATFORMS: cpu
+      XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      HF_HUB_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      WANDB_MODE: disabled
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: requirements/ci-cpu.lock
+      - name: Install native build and media prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential linux-libc-dev ffmpeg
+      - name: Install the pinned CPU environment
+        run: |
+          uv venv --python 3.11.9 .venv-cpu
+          uv pip sync --python .venv-cpu/bin/python --torch-backend cpu requirements/ci-cpu.lock
+          uv pip install --python .venv-cpu/bin/python --no-deps --no-build-isolation -e . -e packages/openpi-client
+          .venv-cpu/bin/python scripts/install_transformers_patch.py
+      - name: Verify CPU wheels and exact Transformers patch
+        run: .venv-cpu/bin/python .github/scripts/check_cpu_environment.py
+      - name: Run the complete retained scientific test suite offline
+        run: .venv-cpu/bin/python -m pytest --strict-markers -q tests/potential
