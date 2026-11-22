@@ -6,7 +6,7 @@
     "prior_input_dot": "https://arxiv.org/html/2608.18004v1",
     "scalar_pi": "src/openpi/models_pytorch/potential.py"
   },
-  "author": "Nima Kamali",
+  "author": "Nima Kamali and Mert Turna",
   "captions": {
     "comparison_map": "Original architectural comparison. OpenPI predicts a direct action velocity; Scalar-Pi retains its transformer vector output but differentiates an input-dot scalar. The input-dot construction also appears in a U-Net setting in Sun et al.; EnergyFlow instead pools temporal features into a scalar head and uses a negative action gradient as a score. These are different implementations and objectives, not a controlled empirical comparison. The scalar-potential construction itself is not claimed as new.",
     "contrast_intervals": "Eight pre-specified descriptive paired contrasts copied exactly from the saved report. Points are percentage-point differences and bars are the original 95% percentile-bootstrap intervals (10,000 resamples, seed 0). The primary P-B1,K10 contrast is highlighted. Intervals are not adjusted for multiplicity and do not resolve the study's hardware-eligibility limitation.",
@@ -788,7 +788,7 @@
   ],
   "source_report": {
     "path": "results/study-v0.1.0.json",
-    "sha256": "9590dc5a4b8babd1d20957c3d96c97eff01c53ecd2b5d6d1576ffb811e0d641f"
+    "sha256": "87e1f0558514d9f394500fde86bc0563d9782459a9eafd022c6aa03bc282c31a"
   },
   "suite_success": [
     {

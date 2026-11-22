@@ -1,6 +1,6 @@
 # Scalar-potential action experts in pi0.5
 
-**Nima Kamali** · 22 November 2026
+**Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
 [Expanded paper PDF (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
