@@ -1,6 +1,6 @@
 {
   "kind": "expanded_paper_release_v1",
-  "version": "v0.2.0",
+  "version": "v0.1.2",
   "title": "Scalar-potential action experts in pi0.5",
   "author": "Nima Kamali and Mert Turna",
   "date": "2026-11-22",
@@ -8,7 +8,7 @@
   "new_figures": 8,
   "planned_studies": 5,
   "new_experiments": false,
-  "source_commit": "d8d662cf6ef4935528e0f43a55f5993885ec2ed1",
+  "source_commit": "eb5cf5d5b7d659b065e7274afad3b240233b8f68",
   "scientific_worker_commit": "a9c0bdbf5f20356246f25ec303c51e466fa4c3a3",
   "hardware_acceptance_claimed": false,
   "data": {
@@ -28,13 +28,13 @@
     },
     {
       "path": "scalar-pi-source.zip",
-      "bytes": 1842977,
-      "sha256": "e8fb4008d7814d135f424fec0e9d1c2d3b81a1b2f336cca04d7cdc35c0df9ce3"
+      "bytes": 1842978,
+      "sha256": "b0bf6df350bc4d8d3c3db6252001e7afdb3f3fba7deff2bf32deddd59291ec83"
     },
     {
       "path": "scalar-pi-figures.zip",
-      "bytes": 1738791,
-      "sha256": "309757cfb4a867de9a487379e8722f547a6ee979898c1e40c9e8dd55c8bd261f"
+      "bytes": 1738789,
+      "sha256": "3b7d2504dafe1f7469a64407eb6fc6902322fb7c63772ac19fe23d8920f63727"
     },
     {
       "path": "data-reference.json",
@@ -45,6 +45,6 @@
   "checksums": {
     "path": "checksums.sha256",
     "bytes": 351,
-    "sha256": "2a509d3705023668d762109779e9fb245fc2c534c6aeec9bcda8b9ef6124d7c4"
+    "sha256": "aa505b9a207230d61d0504e294ec9b88ea1c8e722c855c0a72b0d97cc5f1615c"
   }
 }
