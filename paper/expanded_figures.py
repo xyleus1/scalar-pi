@@ -303,10 +303,10 @@ def comparison_map():
     middle = [
         r"$v=f_\theta(x,t,c)$",
         r"$\Phi=x^\top f_\theta(x,t,c)$",
-        r"$\Phi=x^\top f_\theta(x,t,c)$",
+        r"$\Psi=x^\top f_\theta(x,t,c)$",
         "Scalar MLP head\n" + r"$E_\theta(x,t,c)$",
     ]
-    outputs = ["Direct velocity", r"$\nabla_x\Phi$", r"$v=\nabla_x\Phi$", r"$s=-\nabla_x E_\theta$"]
+    outputs = ["Direct velocity", r"$\nabla_x\Phi$", r"$v=\nabla_x\Psi$", r"$s=-\nabla_x E_\theta$"]
     for i in range(4):
         x = 0.12 + 3 * i
         col = COLORS["P"] if i == 2 else INK
@@ -613,7 +613,8 @@ def future_studies():
         (
             "03  Geometric structure",
             "Invariant scalar → equivariant gradient",
-            r"$\Phi(Rx,t,Rc)=\Phi(x,t,c)$ for orthogonal $R$" "\nCalibrated relative coordinates; explicit symmetries",
+            r"$\Psi(Rx,t,T_Rc)=\Psi(x,t,c)$ for orthogonal $R$"
+            "\nCalibrated relative coordinates; explicit symmetries",
             "Matched augmentation and direct-equivariant models",
         ),
         (
