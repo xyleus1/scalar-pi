@@ -1,5 +1,9 @@
 # Normalization statistics
 
+This page retains OpenPI's general normalization reference. Scalar-Pi uses one
+shared LIBERO statistics file across B0, B1, and P; see the
+[study data preparation commands](reproduction.md#prepare-the-data-and-base-weights).
+
 Following common practice, our models normalize the proprioceptive state inputs and action targets during policy training and inference. The statistics used for normalization are computed over the training data and stored alongside the model checkpoint.
 
 ## Reloading normalization statistics
@@ -25,7 +29,7 @@ For an example of a full training config that reloads normalization statistics, 
 
 **Note:** To successfully reload normalization statistics, it's important that your robot + dataset are following the action space definitions used in pre-training. We provide a detailed description of our action space definitions below.
 
-**Note #2:** Whether reloading normalization statistics is beneficial depends on the similarity of your robot and task to the robot and task distribution in the pre-training dataset. We recommend to always try both, reloading and training with a fresh set of statistics computed on your new dataset (see [main README](../README.md) for instructions on how to compute new statistics), and pick the one that works better for your task.
+For other datasets, the choice between existing and newly computed statistics is part of the experiment design. See the [upstream training guide](https://github.com/Physical-Intelligence/openpi#fine-tuning-base-models-on-your-own-data) for general fine-tuning instructions. Scalar-Pi's matched comparison keeps its normalization fixed across arms.
 
 
 ## Provided Pre-training Normalization Statistics

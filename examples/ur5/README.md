@@ -1,6 +1,6 @@
 # UR5 Example
 
-Below we provide an outline of how to implement the key components mentioned in the "Finetune on your data" section of the [README](../README.md) for finetuning on UR5 datasets.
+This upstream example outlines the components described in OpenPI's [fine-tuning guide](https://github.com/Physical-Intelligence/openpi#fine-tuning-base-models-on-your-own-data) for UR5 datasets. It is separate from the Scalar-Pi LIBERO study.
 
 First, we will define the `UR5Inputs` and `UR5Outputs` classes, which map the UR5 environment to the model and vice versa. Check the corresponding files in `src/openpi/policies/libero_policy.py` for comments explaining each line.
 

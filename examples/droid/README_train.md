@@ -105,5 +105,5 @@ To launch training:
 uv run scripts/train.py pi05_droid_finetune --exp-name=my_experiment --overwrite
 ```
 
-Once trained, you can follow the instructions in [`examples/droid/README.md`](examples/droid/README.md) to serve the policy and run it on the robot.
+Once trained, follow the [DROID inference instructions](README.md) to serve the policy and run it on the robot.
 
