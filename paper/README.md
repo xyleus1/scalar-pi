@@ -1,6 +1,6 @@
 # Paper and descriptive reproduction
 
-**Nima Kamali.** *Scalar-Potential Action Experts in a Pretrained pi0.5 Policy:
+**Nima Kamali and [Mert Turna](https://github.com/mmturna).** *Scalar-Potential Action Experts in a Pretrained pi0.5 Policy:
 A Controlled LIBERO Study* (2026).
 
 The completed observed grid contains 40,000 episodes, 800 tasks, 20 checkpoint/K
@@ -54,7 +54,7 @@ The bundled figures/tables are also available without running Matplotlib.
 
 ## Attribution and provenance
 
-Original paper/results: CC BY 4.0, Nima Kamali; see `../LICENSE-RESEARCH`.
+Credit Nima Kamali and Mert Turna when citing the original paper and results under CC BY 4.0. See `../LICENSE-RESEARCH`.
 Code and the retained OpenPI source snapshots: Apache-2.0; see `../LICENSE`.
 Third-party model/data terms remain unchanged. The scientific worker commit is
 `a9c0bdbf5f20356246f25ec303c51e466fa4c3a3`. `reproducibility/sources.json` records
