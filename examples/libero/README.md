@@ -1,5 +1,9 @@
 # LIBERO Benchmark
 
+For Scalar-Pi's matched experiment and reported results, use the
+[study reproduction guide](../../docs/reproduction.md). The commands below describe
+the underlying OpenPI simulator integration.
+
 This example runs the LIBERO benchmark: https://github.com/Lifelong-Robot-Learning/LIBERO
 
 This example requires git submodules to be initialized. Don't forget to run:
@@ -82,7 +86,11 @@ Terminal window 2:
 uv run scripts/serve_policy.py --env LIBERO
 ```
 
-## Results
+## Upstream reference results
+
+The following table is retained from OpenPI's example. It is not the measured
+Scalar-Pi result; the study's reference and matched controls are reported in the
+[Scalar-Pi README](../../README.md#results).
 
 If you want to reproduce the following numbers, you can evaluate the checkpoint at `gs://openpi-assets/checkpoints/pi05_libero/`. This
 checkpoint was trained in openpi with the `pi05_libero` config.

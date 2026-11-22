@@ -1,33 +1,20 @@
-# Contributing to openpi
+# Contributing to Scalar-Pi
 
-We welcome contributions, improvements, and modifications. Everyone is welcome to use openpi in accordance to the [license](LICENSE). Contributors are also welcome to submit bug reports, feature requests, and pull requests. We can't promise to approve every pull request, and we are a small team with limited bandwidth to review all requests, but we'll give it our best effort. Specifics are described below.
+For bugs and proposed changes, use the [Scalar-Pi issue tracker](https://github.com/xyleus1/scalar-pi/issues). Include a small reproduction, the source revision, and relevant dependency versions. Remove credentials and private paths from logs before sharing them.
 
-## Issues and feature requests
+Keep changes focused. Model changes should state which experiment they implement; infrastructure or organization changes should preserve the existing model and checkpoint behavior.
 
-You are welcome to use the Github [discussion](https://github.com/Physical-Intelligence/openpi/discussions) feature if you would like to discuss something that is not directly reporting an issue or making a feature request. This is suitable for questions about how to use some aspect of openpi, or other topics.
+## Development checks
 
-If you found a bug or other issue, please first check that the issue was not already reported (use the search bar on Github under Issues). If the issue has not yet been reported, please include this information when filing a Github issue:
+Install the development environment described in the [README](README.md). Before submitting a change:
 
-- Your OS type and version and the version of Python you are using
-- Code that allows us to reproduce your bug, including all dependencies
-- Traceback of any exception
-- Any other information that would help us, such as a screenshot
+```bash
+uv run --no-sync pre-commit run --all-files
+uv run --no-sync python -m pytest -q tests/potential
+```
 
-In order for us to address any issue, we must be able to reproduce it, so if you encountered the issue after making modifications to openpi, please reproduce the issue without any other modifications and provide a code snippet that allows us to quickly reproduce the problem on `main`.
+The CPU CI environment is separate from the canonical GPU environment. See the research workflow for its pinned installation commands. CPU tests cover gradients, small production-model fixtures, checkpoint recovery, data identities, and analysis; they do not establish full-model hardware compatibility.
 
-If you would like to submit a feature request, please check that the feature request does not already exist, and please provide the following information:
+Keep existing scientific contracts intact unless the change explicitly introduces a new experiment: checkpoint keys and metadata, dtype policies, input gradients, RNG restoration, optimizer/EMA order, pairing, and statistical estimators. Add a regression test when fixing a behavioral bug. Documentation-only changes do not need new tests.
 
-- The motivation for the feature
-- A description of the problem you are trying to solve or your use case
-- Enough information for us to understand the nature of the request
-- Some information for how you intend to use it (this might help us in understanding the motivation!)
-
-We can't promise to support every feature request, but it is helpful to us to know the use cases that you are interested in!
-
-## Submitting a pull request
-
-If you implemented support for a new robot or environment, or some other new feature, we welcome pull requests (PRs) to openpi. We encourage you to create a [feature request](https://github.com/Physical-Intelligence/openpi/issues) or make a post on the [discussion](https://github.com/Physical-Intelligence/openpi/discussions) board before starting to work on your PR, if you would like to get a sense for whether we are likely to approve your PR if it is submitted. Since we are a small team with limited ability to provide maintenance and support, we may not accept all PRs (e.g., if we believe it would make the code harder to maintain, or if reviewing the PR is out of scope for us), so contacting us in advance is a good way to get a sense for whether your PR is likely to get approved for merging into openpi directly. But even if it isn't, you are of course more than welcome to maintain your own fork with whatever modifications you would like. When creating PRs, we recommend every contribution to consider the following:
-
-- Make sure that your PR has a clear title and description
-- Run `pre-commit` (install using `pre-commit install` first), and run `ruff check .` and `ruff format .`
-- Make sure your PR passes all tests
+Use short descriptions that explain the behavior changed and how it was checked. Preserve upstream attribution and license notices. The project maintainer is Nima Kamali ([xyleus1](https://github.com/xyleus1)).
