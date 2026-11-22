@@ -1,0 +1,43 @@
+{
+  "assets": [
+    {
+      "bytes": 365320,
+      "path": "scalar-pi-paper.pdf",
+      "sha256": "6e6be845fac7ff6747df1b7733e775570e5a0ebcb97227b71aeaa59b32ed2450"
+    },
+    {
+      "bytes": 147218,
+      "path": "scalar-pi-source.zip",
+      "sha256": "775daeedca67441efb87160cf7e7a828754fffe35a7a7eb26295d022aca0e93b"
+    },
+    {
+      "bytes": 133910955,
+      "path": "scalar-pi-data.zip",
+      "sha256": "745531007019752134b0cf711003750bf752d28908f1057c933d8fa3a0fa6e89"
+    }
+  ],
+  "author": "Nima Kamali",
+  "checksums": {
+    "bytes": 261,
+    "path": "checksums.sha256",
+    "sha256": "d451cfd1ac7ed600e881b26025c67beab66ff3066805946404dd0e55ea076751"
+  },
+  "contrasts": 8,
+  "episode_count": 40000,
+  "hardware_acceptance_claimed": false,
+  "kind": "prepared_public_study_release_v1",
+  "original_paper_results_license": "CC-BY-4.0",
+  "primary_ci95_pp": [
+    -1.2666666666666666,
+    1.7500000000000002
+  ],
+  "primary_difference_pp": 0.3,
+  "release_source_commit": "6c2094645b3e0a461920463d9f3c884c4f35e358",
+  "scientific_worker_commit": "a9c0bdbf5f20356246f25ec303c51e466fa4c3a3",
+  "software_license": "Apache-2.0",
+  "statistical_projection_sha256": "5ab6cd3c6b5e19ac563946fa2b9415540d1822efd6df6709a9c9d168505a6c75",
+  "suite_cells": 80,
+  "task_count": 800,
+  "third_party_licenses_preserved": true,
+  "version": "v0.1.0"
+}
