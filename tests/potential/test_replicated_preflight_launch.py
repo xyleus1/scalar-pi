@@ -474,7 +474,7 @@ def test_single_sxm_watchdog_and_gpu_binding(case):
     _, _, _, _, request = m.load_plan(case.plan_path, root=case.root, now=lambda: NOW)
     assert request["instance_type"] == "gpu_1x_h100_sxm5"
     assert request["region"] == "us-southeast-1" and request["storage_mode"] == "replicated_local"
-    for mismatch in ({"region": "us-south-2"}, {"storage_mode": "persistent_shared"}):
+    for mismatch in ({"region": "us-west-2"}, {"storage_mode": "persistent_shared"}):
         with pytest.raises(ValueError):
             m.validate_request({**request, **mismatch}, NOW)
 
@@ -497,7 +497,7 @@ def test_eight_sxm_profile_and_hardware(case):
     _, _, _, _, request = m.load_plan(case.plan_path, root=case.root, now=lambda: NOW)
     assert request["instance_type"] == "gpu_8x_h100_sxm5" and request["storage_mode"] == "replicated_local"
     with pytest.raises(ValueError):
-        m.validate_request({**request, "region": "us-southeast-1"}, NOW)
+        m.validate_request({**request, "region": "us-west-2"}, NOW)
     validate = host_gpu_validator()
     h100 = [f"NVIDIA H100 80GB HBM3, 81559, 580.196.07, GPU-{i:036x}, 9.0" for i in range(8)]
     a100 = [f"NVIDIA A100-SXM4-80GB, 81251, 580.196.07, GPU-{i:036x}, 8.0" for i in range(8)]

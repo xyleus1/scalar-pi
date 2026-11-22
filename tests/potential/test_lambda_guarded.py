@@ -258,8 +258,13 @@ def test_launch_is_once_detached_bound_and_recorded(guarded, setup):
     ("region", "instance_type", "gpu_count", "rate_cents"),
     [
         ("us-southeast-1", "gpu_1x_h100_sxm5", 1, 489),
+        ("us-south-2", "gpu_1x_h100_sxm5", 1, 489),
+        ("us-south-3", "gpu_1x_h100_sxm5", 1, 489),
         ("us-south-2", "gpu_8x_h100_sxm5", 8, 3672),
+        ("us-south-3", "gpu_8x_h100_sxm5", 8, 3672),
+        ("us-southeast-1", "gpu_8x_h100_sxm5", 8, 3672),
         ("us-southeast-1", "gpu_2x_h100_sxm5", 2, 958),
+        ("us-south-2", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-3", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-2", "gpu_4x_h100_sxm5", 4, 1876),
         ("us-south-3", "gpu_4x_h100_sxm5", 4, 1876),
