@@ -1,8 +1,13 @@
 .venv
 .venv-cpu
+.research
 .git
 research_outputs
 .pytest_cache
-results
+results/*
+!results/study-v0.1.0.json
+paper/*
+!paper/reproduce_descriptive.py
+!paper/reproducibility/
 checkpoints
 data

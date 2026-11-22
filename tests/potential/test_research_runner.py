@@ -13,12 +13,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_rendered_full_matrix_preserves_original_cells(tmp_path):
-    manifest = potential_matrix.render_matrix(ROOT, tmp_path, "full")
+    timing = tmp_path / "timing.json"
+    manifest = potential_matrix.render_matrix(ROOT, tmp_path, "full", timing_report=timing)
     cells = evaluation.matrix_cells(manifest)
     assert len(cells) == 80
     assert manifest["training_seeds"] == [17, 42, 93]
     assert manifest["num_trials_per_task"] == 50
     assert manifest["num_tasks_per_suite"] == 10
+    assert manifest["timing_report"] == str(timing)
     runner = str(ROOT / "scripts/docker/run_potential.sh")
     assert manifest["server_command_prefix"] == ["bash", runner, "server", "--execute"]
     assert manifest["client_command_prefix"] == ["bash", runner, "simulator", "--execute"]
@@ -46,6 +48,9 @@ def test_container_preview_never_starts_docker(tmp_path):
     docker = tmp_path / "docker"
     docker.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 99\n")
     docker.chmod(0o755)
+    git = tmp_path / "git"
+    git.write_text("#!/bin/sh\nprintf '%s\\n' '0000000000000000000000000000000000000000'\n")
+    git.chmod(0o755)
     env = {**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]}
     result = subprocess.run(
         ["bash", str(ROOT / "scripts/docker/run_potential.sh"), "server", "--port", "8001"],

@@ -77,6 +77,9 @@ fi
 if [[ "$phase" == calibrate ]]; then
     exec python3 scripts/calibrate_potential_evaluation.py "$@" --execute
 fi
+if [[ "$phase" == prepare-calibration ]]; then
+    exec python3 scripts/prepare_potential_calibration.py --root "$root" "$@"
+fi
 if [[ "$phase" == archive ]]; then
     # Logs and final checkpoints already live on the persistent filesystem.
     # Export their hashes without duplicating multi-GB checkpoints.

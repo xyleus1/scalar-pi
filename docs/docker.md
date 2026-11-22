@@ -10,7 +10,7 @@ bash scripts/docker/run_potential.sh inspect
 bash scripts/docker/run_potential.sh build --execute
 ```
 
-Build from a clean committed checkout. The runner saves both image identities and an image archive under the selected root. The model image is defined in `scripts/docker/train_potential.Dockerfile`; the simulator is defined in `examples/libero/Dockerfile`.
+Build from a clean committed checkout with Python 3.11 available on the host. The runner saves both image identities and an image archive under the selected root. The model image is defined in `scripts/docker/train_potential.Dockerfile`; the simulator is defined in `examples/libero/Dockerfile`. The model build runs the research CPU tests, including the small public paper/report fixtures checked into Git. It does not require release ZIPs or private rollout data.
 
 ## Commands
 
@@ -26,13 +26,17 @@ Every command previews its action unless `--execute` follows the phase name.
 | `server` | Start the existing policy server |
 | `simulator` | Run the native LIBERO client with EGL |
 | `evaluate` | Execute a prepared evaluation matrix |
+| `prepare-calibration` | Verify profile reports and render their timing specification |
 | `calibrate` | Execute a prepared timing specification |
+| `archive` | Hash the persistent experiment artifacts |
 
 ```bash
 bash scripts/docker/run_potential.sh model --execute python scripts/potential_preflight.py
 ```
 
 The checkout is mounted at `/app`, persistent data at `/data`, and the selected root at the same absolute host path. These mappings let the model and simulator resolve the same manifest and checkpoint paths. The wrapper supplies actual image identities and retains per-process container cleanup on exit.
+
+Use absolute paths beneath `$SCALAR_PI_ROOT` for training/profile outputs that host-side tools will later verify. The `evaluate`, `prepare-calibration`, `calibrate`, and `archive` phases run their lightweight Python controllers on the host; evaluation and calibration then launch the appropriate containers. A full evaluation manifest needs a measured `timing_report`; a preview alone does not verify checkpoint or timing evidence.
 
 Research serving uses Torch with CPU JAX initialization. The released `pi05_libero` reference uses CUDA JAX. Keep this distinction when constructing commands outside the wrapper.
 

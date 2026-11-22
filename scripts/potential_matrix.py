@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 
 
-def render_matrix(repo, root, study, *, diagnostic=False, attempt="default"):
+def render_matrix(repo, root, study, *, diagnostic=False, attempt="default", timing_report=None):
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", attempt):
         raise ValueError("Attempt must be a short filename component")
     filename = "libero_matrix.example.json" if study == "full" else "libero_matrix.pilot.json"
@@ -17,6 +17,8 @@ def render_matrix(repo, root, study, *, diagnostic=False, attempt="default"):
     matrix["server_command_prefix"] = ["bash", wrapper, "server", "--execute"]
     matrix["client_command_prefix"] = ["bash", wrapper, "simulator", "--execute"]
     matrix["output_dir"] = str(root / "data/experiments/results" / study)
+    if timing_report is not None:
+        matrix["timing_report"] = str(timing_report)
     for variant in matrix["variants"]:
         if variant.get("reference"):
             checkpoint = root / "data/openpi-cache/openpi-assets/checkpoints/pi05_libero"
@@ -66,13 +68,21 @@ def main():
     parser.add_argument("--study", choices=("full", "pilot"), default="full")
     parser.add_argument("--diagnostic", action="store_true", help="Only four released-policy compatibility episodes")
     parser.add_argument("--attempt", default="default", help="Separate diagnostic attempts; never overwrite evidence")
+    parser.add_argument("--timing-report", type=Path, help="Measured timing report; verified when evaluation executes")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output}")
     result = (
-        render_matrix(repo, args.root, args.study, diagnostic=args.diagnostic, attempt=args.attempt)
+        render_matrix(
+            repo,
+            args.root,
+            args.study,
+            diagnostic=args.diagnostic,
+            attempt=args.attempt,
+            timing_report=args.timing_report,
+        )
         if args.action == "render"
         else archive(args.root)
     )

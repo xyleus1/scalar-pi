@@ -31,6 +31,9 @@ COPY scripts/ ./scripts/
 COPY examples/ ./examples/
 COPY configs/ ./configs/
 COPY tests/potential/ ./tests/potential/
+COPY paper/reproduce_descriptive.py ./paper/reproduce_descriptive.py
+COPY paper/reproducibility/ ./paper/reproducibility/
+COPY results/study-v0.1.0.json ./results/study-v0.1.0.json
 COPY docs/potential_pi05.md ./docs/potential_pi05.md
 RUN --mount=type=cache,target=/root/.cache/uv bash scripts/setup_potential.sh
 
