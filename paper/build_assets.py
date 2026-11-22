@@ -24,7 +24,7 @@ def tex(value):
 
 
 def design():
-    (HERE / "tables/design.tex").write_text(r"""\begin{table}[t]
+    (HERE / "tables/design.tex").write_text(r"""\begin{table}[!htbp]
 \centering
 \begin{tabular}{llll}
 \toprule Arm & Trunk & Output initialization & Velocity \\
