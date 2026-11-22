@@ -1,6 +1,13 @@
 # Figure design study
 
-22 November 2026. Design notes for the Scalar-Pi v0.1.3 paper revision.
+22 November 2026. Design notes for the Scalar-Pi v0.1.4 paper revision.
+
+The current paper contains four figures: the shared expert and paired readout,
+suite-level success, paired contrasts, and task heterogeneity. It ends with
+one compact checkpoint-count appendix and the references. The earlier
+v0.1.3 visual study and iteration observations below are retained as design
+history; the current placement decisions are stated explicitly here and in
+the v0.1.4 pass near the end.
 
 This revision changes how the existing evidence is presented. It does not add
 experiments or alter success counts, paired intervals, evaluation identities,
@@ -24,7 +31,7 @@ These are observations from the linked figures. The adoption decisions are our
 design judgments. No third-party figure, robot photograph, or rollout is copied
 into the Scalar-Pi paper.
 
-## Problems addressed in the preceding figures
+## Historical diagnosis before v0.1.3
 
 The earlier diagrams put long descriptions into equally weighted rounded boxes.
 Those boxes explained the topic but did not reveal tensor structure, branching,
@@ -76,16 +83,16 @@ problem directly; higher PNG resolution alone does not.
 - **Output:** vector PDF plus PNG, a common style module, source-linked plotted
   arrays, and the same code path for individual figure export and paper build.
 
-## Placement and interpretation
+## Current placement and interpretation
 
-The main text should prioritize the intervention, matched experimental design,
-overall and suite-level outcomes, paired uncertainty, and task heterogeneity.
-The complete 40-task view belongs in the appendix where labels can use the
-required space. A literature comparison graphic is not a leaderboard: the
-source protocols differ. A table or clearly separated small panels is more
-honest than a common ranked axis. Likewise, the five planned studies should
-show their computational differences without receiving the visual emphasis
-of completed results.
+The four main figures prioritize the intervention, overall and suite-level
+outcomes, paired uncertainty, and task heterogeneity. The full 40-task view,
+repeated coverage graphic, external-study plots, and future-work schematic are
+not paper figures in v0.1.4. Per-task records, plotted arrays, and source
+references remain in the accompanying data and source material. The five
+planned studies remain in prose and equations. This avoids repeating results
+or giving measurements from unrelated protocols the visual status of a common
+leaderboard. The sole appendix gives compact checkpoint-level counts.
 
 Illustrative action blocks are symbols for tensors, not reconstructed
 demonstrations. No image implies that Scalar-Pi has measured smoother motion,
@@ -137,7 +144,7 @@ multiples with a shared legend, and a forest plot with aligned numerical
 intervals. It does not justify a decorative typeface or additional colors.
 
 
-## Iteration record
+## Historical v0.1.3 iteration record
 
 The first new rendering was reviewed at approximately 700 pixels across,
 matching a full-width figure on a normal paper display rather than a poster
@@ -158,3 +165,79 @@ renders of the success and task-detail figures retained distinguishable square,
 triangle, circle, and diamond identities. This is a substantial legibility
 improvement over the preceding 4.5?4.8-point effective labels, independent of
 PNG resolution.
+
+
+## Current v0.1.4 pass: density, consistency, and scope
+
+A further user review requested denser figures and a less confusing ending.
+This pass supersedes the earlier recommendation to retain several graphics in
+appendices. A figure can be well drawn yet still weaken the paper if it repeats
+an existing result or interrupts the argument with unrelated measurements.
+
+**Reference identity.** The verified [Mind Robotics site](https://www.mindrobotics.com/)
+presents factory imagery and its company approach. No primary research-paper
+figure was found there during this review. Mind Robotics is not silently
+substituted with Google DeepMind. The latter's independently identified
+[Gemini Robotics 1.5 technical report](https://storage.googleapis.com/deepmind-media/gemini-robotics/Gemini-Robotics-1-5-Tech-Report.pdf)
+was downloaded and its pages 2, 6, 7, and 11 inspected visually. Figures 3?4
+repeat a common chart layout across embodiments, sharing legends and model
+colors; Fig. 8 uses direct labels on a small scatter plot. Their density comes
+from aligned comparisons and short labels. We adopt those conventions without
+copying the blue/purple palette, photographs, or the more decorative overview.
+
+**DYNA's actual research figures.** [DYNA-2](https://www.dyna.co/dyna-2) is a
+company-authored HTML research report, not a PDF paper retrieved from arXiv.
+Its original inline SVGs were extracted and rendered locally, with the original
+geometry and color attributes and fallback fonts. The inspected artifacts were
+[Fig. 3](https://www.dyna.co/dyna-2#fig-3), an architecture drawing with parallel
+video/action stacks; [Fig. 10](https://www.dyna.co/dyna-2#fig-10), an ablation
+with directly labeled curves; [Fig. 13](https://www.dyna.co/dyna-2#fig-13), two
+matched outcome quantities with paired uncertainty; and
+[Fig. 14](https://www.dyna.co/dyna-2#fig-14), a two-condition grouped comparison.
+Each has a small, explicit experimental question. Repeated panels share scales
+and legends, and the changed condition is visible without a paragraph of text
+inside the axes. We retain these ideas, not DYNA's font or additional colors.
+The report's empirical claims are not imported into Scalar-Pi's results.
+
+**Concrete decisions for the revised paper.**
+
+- Keep one integrated method figure and the three empirical figures that answer
+  the paper's questions: aggregate/suite success, paired contrasts, and task
+  heterogeneity. Draw all of them with one text, line, and marker system.
+- Place one-step and ten-step success panels beside each other with a shared
+  vertical scale and legend. Keep seed marks visible; density must not erase
+  run-to-run variation.
+- Use neutral text for labels and interval values. Reserve model colors and
+  marker identities for data and computational branches. Keep the primary
+  contrast identifiable through weight and wording as well as its location.
+- Remove the redundant coverage graphic, repeated contrast table, complete
+  heatmap, literature-comparison graphic, and large future-work schematic from
+  the paper's trailing pages. Retain their data or source artifacts separately
+  where appropriate. This changes editorial placement, not experiment records.
+- Preserve the five proposed studies in prose and equations. Do not let an
+  appendix of external success rates visually compete with this study's
+  descriptive results or imply a unified leaderboard.
+
+The compact result iteration was inspected at publication width: success is
+7.0 by 2.55 inches, contrasts 7.0 by 2.65 inches, and task detail 7.0 by 2.9
+inches. Eight-point labels and nine-point panel headers remain legible; the
+short case-study panels retain all three seed observations and release
+baselines. No collision or clipping was observed in those three renders.
+
+The compact 7.0 by 2.9-inch method figure was then reviewed against all three
+result figures. Its shared-expert and paired-readout layout retains the full
+input derivative, differentiates direct and scalar computation, and moves
+protocol constants into one narrow footer. Its eight-point body and nine-point
+headers match the result figures. No clipping or label collision was observed.
+
+
+## Final v0.1.4 page review
+
+The second compiled draft contains 14 pages. The method figure sits beside the
+opening method section on page 3; all four figures retain their captions and
+readable labels. The conclusion and compact checkpoint-count appendix share
+page 12, followed directly by references on pages 13?14. There are no orphan
+appendix headings or isolated figure pages. The tail no longer alternates
+among redundant coverage plots, unrelated literature charts, and proposed
+architecture drawings. No clipping or detached captions were observed in the
+reviewed final layout.

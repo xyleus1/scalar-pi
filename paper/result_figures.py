@@ -4,14 +4,11 @@ import json
 from pathlib import Path
 
 from figure_style import COLORS
-from figure_style import DIFFERENCE_CMAP
 from figure_style import GRID
 from figure_style import INK
-from figure_style import MUTED
 from figure_style import save
 from figure_style import style
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -22,67 +19,31 @@ GROUPS = ("B0", "B1", "P", "reference")
 SEEDS = (17, 42, 93)
 MARKERS = {"B0": "s", "B1": "^", "P": "o", "reference": "D"}
 NAMES = {"B0": "B0: pretrained direct", "B1": "B1: reset direct", "P": "P: scalar", "reference": "Released"}
-TASK_LABELS = {
-    "libero_spatial": [
-        "Between plate / ramekin",
-        "Next to ramekin",
-        "Table center",
-        "On cookie box",
-        "In top drawer",
-        "On ramekin",
-        "Next to cookie box",
-        "On stove",
-        "Next to plate",
-        "On cabinet",
-    ],
-    "libero_object": [
-        "Alphabet soup",
-        "Cream cheese",
-        "Salad dressing",
-        "BBQ sauce",
-        "Ketchup",
-        "Tomato sauce",
-        "Butter",
-        "Milk",
-        "Chocolate pudding",
-        "Orange juice",
-    ],
-    "libero_goal": [
-        "Open middle drawer",
-        "Bowl to stove",
-        "Wine bottle to cabinet",
-        "Bowl into top drawer",
-        "Bowl to cabinet",
-        "Plate to stove front",
-        "Cream cheese in bowl",
-        "Stove on",
-        "Bowl to plate",
-        "Wine bottle to rack",
-    ],
-    "libero_10": [
-        "Soup + sauce to basket",
-        "Cheese + butter to basket",
-        "Stove on + moka pot",
-        "Bowl in drawer; close",
-        "Mugs to separate plates",
-        "Book to caddy",
-        "Mug + pudding to plate",
-        "Soup + cheese to basket",
-        "Both moka pots to stove",
-        "Mug in microwave; close",
-    ],
-}
+LONG_TASK_LABELS = [
+    "Soup + sauce to basket",
+    "Cheese + butter to basket",
+    "Stove on + moka pot",
+    "Bowl in drawer; close",
+    "Mugs to separate plates",
+    "Book to caddy",
+    "Mug + pudding to plate",
+    "Soup + cheese to basket",
+    "Both moka pots to stove",
+    "Mug in microwave; close",
+]
 
 
 def panel(ax, label, title):
-    ax.set_title(f"({label}) {title}", loc="left", fontsize=9, fontweight="normal", pad=8)
+    ax.set_title(f"({label}) {title}", loc="left", fontsize=9, fontweight="bold", pad=5)
 
 
 def tidy(ax, *, grid="y"):
     ax.spines[["top", "right"]].set_visible(False)
     ax.spines[["left", "bottom"]].set_color("#888888")
     ax.spines[["left", "bottom"]].set_linewidth(0.5)
-    ax.tick_params(length=2.5, width=0.5, pad=3, colors=INK)
+    ax.tick_params(length=2.5, width=0.5, pad=3, colors=INK, labelsize=8)
+    ax.xaxis.label.set_size(8)
+    ax.yaxis.label.set_size(8)
     if grid:
         ax.grid(axis=grid, color=GRID, linewidth=0.45, zorder=0)
         ax.set_axisbelow(True)
@@ -103,7 +64,7 @@ def model_legend(fig, *, anchor=(0.5, 1.0), groups=GROUPS):
 
 
 def success_overview(data):
-    fig, axes = plt.subplots(2, 1, figsize=(7, 3.9), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7, 2.55), sharex=True, sharey=True)
     for ax, k, letter in zip(axes, (1, 10), "ab", strict=True):
         for suite_index, suite in enumerate((*SUITES, "overall")):
             rows = [
@@ -122,7 +83,7 @@ def success_overview(data):
                     ax.scatter(
                         x + np.array([-0.035, 0, 0.035]),
                         vals,
-                        s=11,
+                        s=9,
                         marker=MARKERS[group],
                         color=COLORS[group],
                         edgecolor="white",
@@ -131,13 +92,13 @@ def success_overview(data):
                     )
                     ax.plot([x - 0.065, x + 0.065], [vals.mean()] * 2, color=COLORS[group], lw=1.5, zorder=3)
         panel(ax, letter, f"{k} Euler step" + ("s" if k != 1 else ""))
-        ax.set(ylabel="Success (%)", ylim=(70, 101.5), yticks=[70, 80, 90, 100], xlim=(-0.55, 4.55))
+        ax.set(ylim=(70, 101.5), yticks=[70, 80, 90, 100], xlim=(-0.55, 4.55))
+        ax.set(xticks=np.arange(5), xticklabels=SUITE_LABELS)
         ax.axvline(3.5, color="#BBBBBB", lw=0.55, ls=(0, (2, 2)))
         tidy(ax)
-    axes[-1].set(xticks=np.arange(5), xticklabels=SUITE_LABELS)
-    axes[0].tick_params(labelbottom=True)
+    axes[0].set_ylabel("Success (%)", fontsize=8)
     model_legend(fig, anchor=(0.54, 1.005))
-    fig.subplots_adjust(left=0.075, right=0.99, top=0.875, bottom=0.09, hspace=0.48)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.80, bottom=0.14, wspace=0.13)
     save(fig, "success_overview")
 
 
@@ -150,10 +111,10 @@ def contrast_intervals(data):
     solver = [r for r in records if r["kind"] != "architecture"]
     ordered = architecture + solver
     assert len(ordered) == 8
-    fig = plt.figure(figsize=(7, 3.3))
-    ax = fig.add_axes((0.35, 0.17, 0.39, 0.72))
-    label_ax = fig.add_axes((0.02, 0.17, 0.32, 0.72), sharey=ax)
-    value_ax = fig.add_axes((0.765, 0.17, 0.225, 0.72), sharey=ax)
+    fig = plt.figure(figsize=(7, 2.65))
+    ax = fig.add_axes((0.35, 0.20, 0.39, 0.69))
+    label_ax = fig.add_axes((0.02, 0.20, 0.32, 0.69), sharey=ax)
+    value_ax = fig.add_axes((0.765, 0.20, 0.225, 0.69), sharey=ax)
     for text_ax in (label_ax, value_ax):
         text_ax.set_xlim(0, 1)
         text_ax.axis("off")
@@ -171,21 +132,21 @@ def contrast_intervals(data):
             label = f"{group}: K = {left['num_steps']} - K = {right['num_steps']}"
         if primary:
             label += "  (primary)"
-        label_ax.text(0, y, label, va="center", fontsize=8.3, color=color, fontweight="bold" if primary else "normal")
+        label_ax.text(0, y, label, va="center", fontsize=8, color=INK, fontweight="bold" if primary else "normal")
         value_ax.text(
             1,
             y,
             f"{p:+.2f} [{lo:+.2f}, {hi:+.2f}]",
             ha="right",
             va="center",
-            fontsize=7.5,
-            color=color,
+            fontsize=8,
+            color=INK,
         )
         ax.errorbar(
             p,
             y,
             xerr=[[p - lo], [hi - p]],
-            fmt="o",
+            fmt=MARKERS[left["group"]],
             color=color,
             markersize=4,
             elinewidth=1,
@@ -200,23 +161,16 @@ def contrast_intervals(data):
     ax.set(xlim=(-2, 4), xticks=[-2, -1, 0, 1, 2, 3, 4], yticks=[], xlabel="Success difference (pp)")
     tidy(ax, grid="x")
     ax.spines["left"].set_visible(False)
-    label_ax.text(0, 8.05, "Comparison", fontsize=8.2)
-    value_ax.text(1, 8.05, "Difference [95% interval]", ha="right", fontsize=8.2)
-    fig.text(
-        0.02,
-        0.025,
-        "Paired episodes: 6,000 per trained contrast; 2,000 for the released policy.",
-        fontsize=7.5,
-        color=MUTED,
-    )
+    label_ax.text(0, 8.05, "Comparison", fontsize=9, weight="bold")
+    value_ax.text(1, 8.05, "Difference [95% interval]", ha="right", fontsize=9, weight="bold")
     save(fig, "contrast_intervals")
 
 
 def task_differences(data):
     rows = {(r["num_steps"], r["task_id"]): r for r in data["task_comparisons"] if r["suite"] == "libero_10"}
-    fig = plt.figure(figsize=(7, 3.9))
+    fig = plt.figure(figsize=(7, 2.9))
     gs = fig.add_gridspec(
-        2, 2, width_ratios=[1.25, 1], hspace=0.58, wspace=0.52, left=0.255, right=0.975, bottom=0.2, top=0.87
+        2, 2, width_ratios=[1.25, 1], hspace=0.62, wspace=0.52, left=0.255, right=0.975, bottom=0.17, top=0.81
     )
     ax = fig.add_subplot(gs[:, 0])
     for t in range(10):
@@ -227,25 +181,25 @@ def task_differences(data):
     ax.axvline(0, color="#888888", lw=0.6, ls=(0, (3, 3)))
     ax.set(
         yticks=np.arange(10),
-        yticklabels=[f"{t:02d}  {TASK_LABELS['libero_10'][t]}" for t in range(9, -1, -1)],
+        yticklabels=[f"{t:02d}  {LONG_TASK_LABELS[t]}" for t in range(9, -1, -1)],
         ylim=(-0.65, 9.65),
         xlim=(-40, 40),
         xticks=[-40, -20, 0, 20, 40],
         xlabel="Success difference (pp)",
     )
-    ax.tick_params(axis="y", labelsize=7.5, length=0)
+    ax.tick_params(axis="y", labelsize=8, length=0)
     tidy(ax, grid="x")
     ax.spines["left"].set_visible(False)
     panel(ax, "a", "Long tasks, K = 10")
-    ax.legend(
+    fig.legend(
         handles=[
             Line2D([], [], marker="o", ls="", color=COLORS["P"], ms=3, label="P - B1"),
             Line2D([], [], marker="D", ls="", color=COLORS["reference"], ms=3, label="P - released"),
         ],
         loc="upper center",
-        bbox_to_anchor=(0.48, -0.17),
+        bbox_to_anchor=(0.41, 1.0),
         frameon=False,
-        fontsize=7.5,
+        fontsize=8,
         ncol=2,
         handletextpad=0.3,
         columnspacing=0.8,
@@ -264,12 +218,14 @@ def task_differences(data):
             f"{r['released_success_rate'] * 100:.0f}%",
             ha="right",
             va="top",
-            fontsize=7.5,
+            fontsize=8,
             color=COLORS["reference"],
         )
-        a.set_ylabel("Success (%)", labelpad=2)
+        a.set_ylabel("Success (%)", labelpad=2, fontsize=8)
+        if index == 0:
+            a.tick_params(labelbottom=False)
         if index == 1:
-            a.set_xlabel("Training seed")
+            a.set_xlabel("Training seed", fontsize=8)
         tidy(a)
         panel(a, letter, title)
     handles = [
@@ -283,155 +239,11 @@ def task_differences(data):
         bbox_to_anchor=(0.985, 1.0),
         frameon=False,
         ncol=3,
-        fontsize=7.6,
+        fontsize=8,
         handletextpad=0.35,
         columnspacing=0.8,
     )
     save(fig, "task_differences")
-
-
-def task_heatmap_all(data):
-    rows = {(r["suite"], r["num_steps"], r["task_id"]): r for r in data["task_comparisons"]}
-    fig = plt.figure(figsize=(7, 7.1))
-    gs = fig.add_gridspec(2, 2, left=0.23, right=0.985, top=0.91, bottom=0.14, wspace=1.18, hspace=0.36)
-    for index, suite in enumerate(SUITES):
-        ax = fig.add_subplot(gs[index // 2, index % 2])
-        values = np.array(
-            [
-                [rows[(suite, k, t)][field] for field in ("P_minus_B1_pp", "P_minus_reference_pp") for k in (1, 10)]
-                for t in range(10)
-            ]
-        )
-        assert np.abs(values).max() <= 40
-        im = ax.pcolormesh(
-            np.arange(5) - 0.5,
-            np.arange(11) - 0.5,
-            values,
-            cmap=DIFFERENCE_CMAP,
-            vmin=-40,
-            vmax=40,
-            shading="flat",
-            edgecolors="#EEEEEE",
-            linewidth=0.35,
-            rasterized=False,
-        )
-        ax.set(
-            xlim=(-0.5, 3.5),
-            ylim=(9.5, -0.5),
-            yticks=np.arange(10),
-            yticklabels=[f"{t:02d} {TASK_LABELS[suite][t]}" for t in range(10)],
-            xticks=np.arange(4),
-            xticklabels=["K=1", "K=10", "K=1", "K=10"],
-        )
-        ax.xaxis.tick_top()
-        ax.tick_params(length=0, pad=3, labelsize=7.5)
-        ax.text(0.5, 1.075, "P - B1", transform=ax.get_xaxis_transform(), ha="center", fontsize=7.6)
-        ax.text(2.5, 1.075, "P - released", transform=ax.get_xaxis_transform(), ha="center", fontsize=7.6)
-        ax.text(-0.06, 1.20, f"({chr(97 + index)}) {SUITE_LABELS[index]}", transform=ax.transAxes, fontsize=9)
-        ax.axvline(1.5, color="white", lw=2.5)
-        ax.spines[:].set_visible(False)
-        for row in range(10):
-            for col in range(4):
-                v = values[row, col]
-                ax.text(
-                    col,
-                    row,
-                    f"{v:+.1f}" if v else "0",
-                    ha="center",
-                    va="center",
-                    fontsize=7.5,
-                    color="white" if abs(v) >= 28 else INK,
-                )
-    cax = fig.add_axes((0.31, 0.055, 0.47, 0.014))
-    cb = fig.colorbar(im, cax=cax, orientation="horizontal", ticks=[-40, -20, 0, 20, 40])
-    cb.solids.set_rasterized(False)
-    cb.solids.set_edgecolor("face")
-    cb.outline.set_linewidth(0.4)
-    cb.ax.tick_params(labelsize=7.5, width=0.5, length=2)
-    cb.set_label("Success difference (pp)", fontsize=8)
-    save(fig, "task_heatmap_all")
-
-
-def literature_evidence(data):
-    rows = data["literature_evidence"]
-    assert all(r["status"] == "primary_verified" for r in rows)
-    fig, axes = plt.subplots(2, 3, figsize=(7, 3.75))
-    titles = ["Hermite-VLA", "Faithful Plans", "ESP", "DriftingVLA", "SAVLA", "AnyCamVLA"]
-    protocols = [
-        "LIBERO / pi0.5",
-        "Custom Block-AR",
-        "10-step vs. 1-step",
-        "Full-model pi0.5",
-        "10% GR00T data",
-        "Novel camera views",
-    ]
-    for i, (ax, r) in enumerate(zip(axes.flat, rows, strict=True)):
-        values = [r["baseline"], r["variant"]]
-        labels = [r["baseline_label"], r["variant_label"]]
-        if "intermediate" in r:
-            values.insert(1, r["intermediate"])
-            labels.insert(1, "View aug.")
-        labels = [label.replace("conditioning", "cond.") for label in labels]
-        positions = np.arange(len(values))
-        ax.plot(positions, values, color="#777777", lw=0.9, zorder=2)
-        ax.plot(positions, values, linestyle="", marker="o", color="#333333", ms=4, zorder=3)
-        ax.plot(0, values[0], marker="o", mfc="white", mec="#333333", ms=4, zorder=4)
-        for x, value in zip(positions, values, strict=True):
-            ax.annotate(
-                f"{value:g}",
-                (x, value),
-                xytext=(0, 7),
-                textcoords="offset points",
-                ha="center",
-                fontsize=8,
-            )
-        margin = 2.5 if max(values) - min(values) < 10 else 5
-        ax.set(
-            xlim=(-0.25, len(values) - 0.75),
-            ylim=(min(values) - margin, min(100.8, max(values) + margin)),
-            xticks=positions,
-            xticklabels=labels,
-            ylabel="Success (%)" if i % 3 == 0 else "",
-        )
-        ax.tick_params(axis="x", labelsize=7.5)
-        panel(ax, chr(97 + i), titles[i])
-        ax.text(0.5, 1.02, protocols[i], transform=ax.transAxes, ha="center", fontsize=7.5, color=MUTED)
-        tidy(ax)
-    fig.subplots_adjust(left=0.09, right=0.975, top=0.89, bottom=0.13, wspace=0.4, hspace=0.75)
-    save(fig, "literature_evidence")
-
-
-def coverage():
-    data = json.loads((HERE / "current-results.json").read_bytes())
-    matrix = {(r["checkpoint_id"], r["num_steps"]): r for r in data["checkpoint_results"]}
-    checkpoints = [f"{g}-seed{s}" for g in ("B0", "B1", "P") for s in SEEDS] + ["released-pi05-libero"]
-    labels = [f"{g} / {s}" for g in ("B0", "B1", "P") for s in SEEDS] + ["Released"]
-    fig, axes = plt.subplots(1, 2, figsize=(7, 2.6), sharey=True)
-    for ax, k, letter in zip(axes, (1, 10), "ab", strict=True):
-        selected = [matrix[(ck, k)]["observed"] for ck in checkpoints]
-        accepted = [matrix[(ck, k)]["validated"] for ck in checkpoints]
-        y = np.arange(10)
-        ax.barh(y, selected, color="#D8D8D8", height=0.63, edgecolor="#777777", linewidth=0.3)
-        ax.barh(y, accepted, color="#555555", height=0.63, linewidth=0)
-        ax.set(xlim=(0, 2000), xticks=[0, 1000, 2000], yticks=y, yticklabels=labels, xlabel="Episodes")
-        ax.set_ylim(9.65, -0.65)
-        panel(ax, letter, f"K = {k}")
-        tidy(ax, grid="x")
-        ax.tick_params(axis="y", length=0)
-        ax.spines["left"].set_visible(False)
-    fig.legend(
-        handles=[
-            Patch(facecolor="#555555", label="Original phase archives"),
-            Patch(facecolor="#D8D8D8", edgecolor="#777777", linewidth=0.3, label="Other selected episodes"),
-        ],
-        loc="upper center",
-        bbox_to_anchor=(0.52, 1.0),
-        ncol=2,
-        frameon=False,
-        fontsize=7.8,
-    )
-    fig.subplots_adjust(left=0.12, right=0.965, top=0.8, bottom=0.18, wspace=0.12)
-    save(fig, "coverage")
 
 
 def draw_all(data):
@@ -439,9 +251,6 @@ def draw_all(data):
     success_overview(data)
     contrast_intervals(data)
     task_differences(data)
-    task_heatmap_all(data)
-    literature_evidence(data)
-    coverage()
 
 
 if __name__ == "__main__":

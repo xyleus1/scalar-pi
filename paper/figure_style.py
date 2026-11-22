@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import matplotlib as mpl
-from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
@@ -12,19 +11,17 @@ COLORS = {"B0": "#999999", "B1": "#D55E00", "P": "#0072B2", "reference": "#22222
 INK = "#222222"
 MUTED = "#666666"
 GRID = "#D9D9D9"
-PALE = {"B0": "#F2F2F2", "B1": "#FBEDE5", "P": "#E6F1F7", "reference": "#EEEEEE"}
-DIFFERENCE_CMAP = LinearSegmentedColormap.from_list("control_scalar", [COLORS["B1"], "white", COLORS["P"]])
 
 
 def setup_style():
     mpl.rcParams.update(
         {
             "font.family": "DejaVu Sans",
-            "font.size": 8.5,
+            "font.size": 8,
             "font.weight": "normal",
             "axes.titlesize": 9,
-            "axes.titleweight": "normal",
-            "axes.labelsize": 8.5,
+            "axes.titleweight": "bold",
+            "axes.labelsize": 8,
             "axes.labelweight": "normal",
             "xtick.labelsize": 7.5,
             "ytick.labelsize": 7.5,
@@ -66,14 +63,12 @@ def save_figure(fig, name):
         metadata={"Author": "Nima Kamali and Mert Turna", "CreationDate": None, "ModDate": None},
     )
     fig.savefig(folder / f"{name}.png", dpi=300)
-    fig.savefig(folder / f"{name}.svg", metadata={"Date": None, "Creator": "Scalar-Pi"})
+    svg = folder / f"{name}.svg"
+    fig.savefig(svg, metadata={"Date": None, "Creator": "Scalar-Pi"})
+    svg.write_text(
+        "\n".join(line.rstrip() for line in svg.read_text(encoding="utf8").splitlines()) + "\n", encoding="utf8"
+    )
     plt.close(fig)
-
-
-def panel_label(ax, label, title="", *, x=0, y=1.04):
-    ax.text(x, y, f"({label})", transform=ax.transAxes, ha="left", va="bottom", fontsize=9, weight="bold")
-    if title:
-        ax.text(x + 0.055, y, title, transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
 
 
 style = setup_style

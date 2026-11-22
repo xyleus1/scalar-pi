@@ -60,31 +60,33 @@ def current_results():
     rows = current["checkpoint_results"]
     if sum(r["observed"] for r in rows) != current["distinct_episodes"] or current["matched_pairs"] <= 0:
         raise ValueError("Combined evidence disagrees with paper totals")
+    by_key = {(r["checkpoint_id"], r["num_steps"]): r for r in rows}
+    checkpoints = list(dict.fromkeys(r["checkpoint_id"] for r in rows))
+    require(len(by_key) == 20 and len(checkpoints) == 10, "Incomplete checkpoint grid")
+    require(all(r["observed"] == 2000 for r in rows), "Unexpected episode denominator")
     lines = [
-        r"\paragraph{Observed outcomes.} The retained results contain "
-        f"{current['distinct_episodes']:,} distinct original episodes. Table~\\ref{{tab:observed}} "
-        "shows the success counts for every checkpoint and inference-step combination with reported outcomes.",
-        r"\begin{table}[htbp]\centering\begin{tabular}{lrrr}\toprule",
-        r"Checkpoint & Euler steps & Successful / observed & Phase validated \\ \midrule",
+        r"\begin{table}[!htbp]\centering\small",
+        r"\begin{tabular}{lrrrr}\toprule",
+        r"& \multicolumn{2}{c}{$K=1$} & \multicolumn{2}{c}{$K=10$} \\",
+        r"\cmidrule(lr){2-3}\cmidrule(lr){4-5}",
+        r"Checkpoint & Successes & Archived & Successes & Archived \\ \midrule",
     ]
-    lines.extend(
-        tex(r["checkpoint_id"])
-        + f" & {r['num_steps']} & {r['successes']:,} / {r['observed']:,} & {r['validated']:,} "
-        + r"\\"
-        for r in rows
-    )
-    lines.extend(
-        [
-            r"\bottomrule\end{tabular}\caption{Outcome counts across the observed hardware. "
-            r"The final column counts episodes in the original accepted phase archives; task validation is reported separately. The planned count is "
-            r"2,000 episodes per row.}\label{tab:observed}\end{table}",
-            r"\paragraph{Paired comparison.} "
-            f"The observed comparison uses {current['matched_pairs']:,} "
-            "matched ten-step episodes per arm. " + current["support_sentence"],
-            r"\begin{figure}[htbp]\centering\includegraphics[width=\linewidth]{figures/coverage.pdf}"
-            r"\caption{Retained evaluation coverage for each checkpoint and inference-step count, "
-            r"with 2,000 planned episodes per bar.}\end{figure}",
-        ]
+    for i, checkpoint in enumerate(checkpoints):
+        if i in (3, 6, 9):
+            lines.append(r"\addlinespace[3pt]")
+        one, ten = (by_key[(checkpoint, k)] for k in (1, 10))
+        name = "Released reference" if checkpoint == "released-pi05-libero" else checkpoint.replace("-seed", ", seed ")
+        lines.append(
+            tex(name)
+            + f" & {one['successes']:,} & {one['validated']:,} & {ten['successes']:,} & {ten['validated']:,} "
+            + r"\\"
+        )
+    lines.append(
+        r"\bottomrule\end{tabular}\caption{Complete outcome counts. Each solver setting contains "
+        r"2,000 selected episodes per checkpoint. Archived counts refer to the original accepted phase "
+        r"archives (16,000 episodes overall), not to the 40,000 selected rows that passed task-level "
+        r"validation. The cross-device qualification limitation applies to all mixed-device comparisons.}"
+        r"\label{tab:observed}\end{table}"
     )
     (HERE / "tables/results.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (HERE / "tables/conclusion.tex").write_text(conclusion(points) + "\n", encoding="utf-8")

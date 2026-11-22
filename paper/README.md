@@ -2,10 +2,11 @@
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
-[Paper PDF (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-paper.pdf) · [Editable source (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+[Paper PDF (v0.1.4)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.4/scalar-pi-paper.pdf) · [Editable source (v0.1.4)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.4/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-The v0.1.3 revision redraws all ten figures using a shared publication style,
-with consistent model colors, readable labels, and editable vector exports. It introduces no new experiments, outcomes or statistical
+The v0.1.4 revision focuses the paper on four compact figures using a shared publication style,
+with shared model colors, typography, panel layouts, and editable vector exports.
+A single checkpoint-count table replaces the former appendix graphics. It introduces no new experiments, outcomes or statistical
 estimates. The public dataset remains the immutable v0.1.1 release.
 
 The completed observed grid contains 40,000 episodes, 800 task-evaluation runs, 20 checkpoint/K
@@ -46,20 +47,20 @@ were recorded.
 ## Build the PDF
 
 Install a TeX distribution providing `pdflatex` and `bibtex`, with geometry,
-amsmath, amssymb, graphicx, booktabs, array, xcolor, natbib and hyperref. Then:
+amsmath, amssymb, graphicx, booktabs, array, xcolor, natbib, hyperref and caption. Then:
 
 ```bash
 python -m pip install -r paper/requirements-render.txt
 python paper/build.py --output scalar-pi-paper.pdf
 ```
 
-The build regenerates ten figures and the descriptive tables, then compiles
+The build regenerates four figures and the descriptive tables, then compiles
 the manuscript. Intermediate files stay in `paper/build/`. The bundled figures/tables are also available
 without running Matplotlib.
 
 ## Figures, literature and proposed studies
 
-Regenerate all ten figures from the saved statistics and bundled task
+Regenerate all four figures from the saved statistics and bundled task
 descriptions:
 
 ```bash
@@ -74,21 +75,16 @@ references, Applied Compute artifacts, and the design decisions.
 
 | File stem | Content |
 | --- | --- |
-| `comparison_map` | Direct, input-dot and scalar-head architecture relationships |
 | `method` | Full-gradient computation and closed-loop sampling |
-| `coverage` | Selected episode grid and original phase archives |
-| `study_design` | Training arms, seeds, solver settings and evaluation grid |
 | `success_overview` | Suite and overall success, with individual training-seed points |
 | `contrast_intervals` | All eight saved paired differences and descriptive intervals |
 | `task_differences` | Long-horizon task differences and Moka/mugs seed breakdowns |
-| `task_heatmap_all` | All 40 tasks at both solver settings |
-| `literature_evidence` | Other studies' within-paper comparisons, with distinct protocols |
-| `future_studies` | Five proposed studies and their matched controls |
 
 [`figure-data.json`](figure-data.json) contains the plotted data, source hashes,
 task descriptions, captions and literature references. Figure generation does
-not rerun evaluation or estimate new confidence intervals. Results from other
-papers are not pooled into a cross-paper leaderboard.
+not rerun evaluation or estimate new confidence intervals. The full 40-task arrays remain in the data file, even though the paper shows
+selected task examples. Results from other papers are discussed in the text;
+they are not plotted as a cross-paper leaderboard.
 
 The five proposals concern training-only trajectory supervision, event/waypoint
 conditioning, geometric invariance, future-feature prediction, and
