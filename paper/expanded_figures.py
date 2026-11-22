@@ -81,7 +81,7 @@ def save(fig, name):
         folder / f"{name}.pdf",
         bbox_inches="tight",
         pad_inches=0.08,
-        metadata={"Author": "Nima Kamali", "CreationDate": None, "ModDate": None},
+        metadata={"Author": "Nima Kamali and Mert Turna", "CreationDate": None, "ModDate": None},
     )
     fig.savefig(folder / f"{name}.png", dpi=200, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
@@ -171,7 +171,7 @@ def figure_data(dataset=None):
             )
     data = {
         "kind": "scalar_pi_expanded_figure_data_v1",
-        "author": "Nima Kamali",
+        "author": "Nima Kamali and Mert Turna",
         "license": "CC-BY-4.0",
         "source_report": {"path": "results/study-v0.1.0.json", "sha256": digest(REPORT)},
         "episode_count": 40000,

@@ -5,6 +5,8 @@ title: "Scalar-potential action experts in pi0.5"
 authors:
   - family-names: Kamali
     given-names: Nima
+  - family-names: Turna
+    given-names: Mert
 version: 0.2.0
 date-released: 2026-11-22
 repository-code: "https://github.com/xyleus1/scalar-pi"
@@ -15,6 +17,8 @@ preferred-citation:
   authors:
     - family-names: Kamali
       given-names: Nima
+    - family-names: Turna
+      given-names: Mert
   year: 2026
   version: 0.2.0
   url: "https://github.com/xyleus1/scalar-pi/releases/tag/v0.2.0"

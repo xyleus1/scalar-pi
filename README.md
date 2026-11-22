@@ -3,9 +3,9 @@
 [![Research tests](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml)
 [![Code checks](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml)
 
-**Nima Kamali** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
+**Nima Kamali** and **[Mert Turna](https://github.com/mmturna)** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
 
-**Paper:** [Scalar-potential action experts in pi0.5](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip)
+**Paper:** [Scalar-potential action experts in pi0.5](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
 Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
@@ -53,7 +53,7 @@ python scripts/evaluate_potential.py configs/potential/libero_matrix.example.jso
 
 Replace the template checkpoint paths and environment prefixes before execution. The original matrix preserves seeds 17, 42, and 93, paired rollout/noise seed 7, and both solver settings.
 
-The release also includes a CPU-only replay of the reported statistics. Download and extract the [immutable v0.1.0 data ZIP](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip), then run:
+The release also includes a CPU-only replay of the reported statistics. Download and extract the [immutable v0.1.1 data ZIP](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip), then run:
 
 ```bash
 python paper/reproduce_descriptive.py --dataset /path/to/data --check-only

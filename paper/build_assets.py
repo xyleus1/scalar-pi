@@ -59,7 +59,7 @@ def design():
     fig.savefig(
         HERE / "figures/method.pdf",
         bbox_inches="tight",
-        metadata={"Author": "Nima Kamali", "CreationDate": None, "ModDate": None},
+        metadata={"Author": "Nima Kamali and Mert Turna", "CreationDate": None, "ModDate": None},
     )
     fig.savefig(HERE / "figures/method.png", dpi=180, bbox_inches="tight")
     plt.close(fig)

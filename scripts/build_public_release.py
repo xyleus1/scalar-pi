@@ -240,6 +240,21 @@ def zipped(source, output, prefix):
                 )
 
 
+def stage_source(source_package):
+    source_package.mkdir()
+    shutil.copytree(
+        REPO / "paper", source_package / "paper", ignore=shutil.ignore_patterns("build", "__pycache__", ".gitignore")
+    )
+    (source_package / "results").mkdir()
+    for name in ("README.md", "study-v0.1.0.json"):
+        shutil.copyfile(REPO / "results" / name, source_package / "results" / name)
+    (source_package / "scripts").mkdir()
+    shutil.copyfile(REPO / "scripts/build_public_release.py", source_package / "scripts/build_public_release.py")
+    for name in ("LICENSE", "LICENSE_GEMMA.txt", "LICENSE-RESEARCH", "CITATION.cff"):
+        shutil.copyfile(REPO / name, source_package / name)
+    checksums(source_package)
+
+
 def build(source, output, *, resume=False):
     require(
         not output.is_relative_to(source) and not source.is_relative_to(output),
@@ -344,9 +359,10 @@ def build(source, output, *, resume=False):
                 "public_log": file_ref(path, data),
             }
         )
+    study_authors = json.loads((REPO / "results/study-v0.1.0.json").read_bytes())["author"]
     result = {
         "kind": "public_curated_study_dataset_v1",
-        "author": "Nima Kamali",
+        "author": study_authors,
         "license": "CC-BY-4.0",
         "episode_count": 40000,
         "task_count": 800,
@@ -399,19 +415,12 @@ def build(source, output, *, resume=False):
     shutil.copyfile(REPO / "LICENSE-RESEARCH", data / "LICENSE-RESEARCH")
     shutil.copyfile(REPO / "CITATION.cff", data / "CITATION.cff")
     (data / "README.md").write_text(
-        "# Scalar-Pi curated results, v0.1.0\n\nNima Kamali; original results CC BY 4.0.\n\n40,000 selected episodes / 800 tasks / 80 suite cells. Original row validation and closed-lifecycle evidence are digest-linked; this derivative does not claim hardware acceptance. A100 PCIe failed the cross-H100 gate; A100 SXM remains unqualified. All mixed-hardware estimates are descriptive. Four initial infrastructure failures are retained separately; their four successful retries are explicitly selected. No outcomes or statistical settings are changed.\n\nPrivate filesystem paths, cloud identities and control receipts are omitted by an explicit field projection. Public task logs/provenance are derived files with new hashes, not byte-identical originals. See projection-map.json and effective-selections.json. Original per-query latencies and noise seeds are retained; no per-step action/state trajectories or physical jerk metrics were recorded. Timing must remain stratified by actual hardware/runtime/concurrency.\n\nThe source package contains paper/reproduce_descriptive.py. Run it with --dataset pointing here, first --check-only, then --output reproduced.json. It checks all dataset checksums and reproduces all 80 suite cells and eight original contrasts. The unmodified private evidence remains retained outside this public package.\n",
+        f"# Scalar-Pi curated results, v0.1.1\n\n{study_authors}. Original results CC BY 4.0.\n\n40,000 selected episodes / 800 tasks / 80 suite cells. Original row validation and closed-lifecycle evidence are digest-linked; this derivative does not claim hardware acceptance. A100 PCIe failed the cross-H100 gate; A100 SXM remains unqualified. All mixed-hardware estimates are descriptive. Four initial infrastructure failures are retained separately; their four successful retries are explicitly selected. No outcomes or statistical settings are changed.\n\nPrivate filesystem paths, cloud identities and control receipts are omitted by an explicit field projection. Public task logs/provenance are derived files with new hashes, not byte-identical originals. See projection-map.json and effective-selections.json. Original per-query latencies and noise seeds are retained; no per-step action/state trajectories or physical jerk metrics were recorded. Timing must remain stratified by actual hardware/runtime/concurrency.\n\nThe source package contains paper/reproduce_descriptive.py. Run it with --dataset pointing here, first --check-only, then --output reproduced.json. It checks all dataset checksums and reproduces all 80 suite cells and eight original contrasts. The unmodified private evidence remains retained outside this public package.\n",
         encoding="utf8",
     )
     checksums(data)
     source_package = output / "source"
-    source_package.mkdir()
-    shutil.copytree(
-        REPO / "paper", source_package / "paper", ignore=shutil.ignore_patterns("build", "__pycache__", ".gitignore")
-    )
-    shutil.copytree(REPO / "results", source_package / "results")
-    for name in ("LICENSE", "LICENSE_GEMMA.txt", "LICENSE-RESEARCH", "CITATION.cff"):
-        shutil.copyfile(REPO / name, source_package / name)
-    checksums(source_package)
+    stage_source(source_package)
     for tree in (data, source_package):
         for path in tree.rglob("*.json"):
             clean(json.loads(path.read_bytes()))

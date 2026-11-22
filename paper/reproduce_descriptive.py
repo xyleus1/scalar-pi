@@ -167,7 +167,7 @@ def main():
     require(summary == expected["summary"], "80-cell/800-task summaries differ from the delivered study")
     result = {
         "kind": "public_descriptive_reproduction_v1",
-        "author": "Nima Kamali",
+        "author": expected["author"],
         "episode_count": 40000,
         "task_count": 800,
         "suite_cells": 80,

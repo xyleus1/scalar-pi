@@ -2,11 +2,11 @@
 
 **Nima Kamali** · 22 November 2026
 
-[Expanded paper PDF (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip)
+[Expanded paper PDF (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
 The v0.2.0 revision expands the explanation, visualizations, related work and
 proposed studies. It introduces no new experiments, outcomes or statistical
-estimates. The public dataset remains the immutable v0.1.0 release.
+estimates. The public dataset remains the immutable v0.1.1 release.
 
 The completed observed grid contains 40,000 episodes, 800 tasks, 20 checkpoint/K
 combinations and 80 checkpoint/K/suite cells. All selected tasks have retained
@@ -19,7 +19,7 @@ confirmatory superiority or hardware equivalence.
 
 ## Reproduce the results without a GPU
 
-Download and extract [`scalar-pi-data.zip` from v0.1.0](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip).
+Download and extract [`scalar-pi-data.zip` from v0.1.1](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip).
 Python 3.10+ and its standard library are sufficient. From the repository root:
 
 ```bash
@@ -97,7 +97,7 @@ task-level differences.
 
 ## Attribution and provenance
 
-Original paper/results: CC BY 4.0, Nima Kamali; see `../LICENSE-RESEARCH`.
+Credit Nima Kamali and Mert Turna when citing the original paper and results under CC BY 4.0. See `../LICENSE-RESEARCH`.
 Code and the retained OpenPI source snapshots: Apache-2.0; see `../LICENSE`.
 Third-party model/data terms remain unchanged. The scientific worker commit is
 `a9c0bdbf5f20356246f25ec303c51e466fa4c3a3`. `reproducibility/sources.json` records
