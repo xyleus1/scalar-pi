@@ -2,13 +2,13 @@
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
-[Expanded paper PDF (v0.1.2)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.2/scalar-pi-paper.pdf) · [Editable source (v0.1.2)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.2/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+[Paper PDF (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-paper.pdf) · [Editable source (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-The v0.1.2 revision expands the explanation, visualizations, related work and
-proposed studies. It introduces no new experiments, outcomes or statistical
+The v0.1.3 revision redraws all ten figures using a shared publication style,
+with consistent model colors, readable labels, and editable vector exports. It introduces no new experiments, outcomes or statistical
 estimates. The public dataset remains the immutable v0.1.1 release.
 
-The completed observed grid contains 40,000 episodes, 800 tasks, 20 checkpoint/K
+The completed observed grid contains 40,000 episodes, 800 task-evaluation runs, 20 checkpoint/K
 combinations and 80 checkpoint/K/suite cells. All selected tasks have retained
 original row-validation and closed-execution evidence. The original phase
 archives separately account for 16,000 episodes. The primary descriptive P minus
@@ -53,25 +53,30 @@ python -m pip install -r paper/requirements-render.txt
 python paper/build.py --output scalar-pi-paper.pdf
 ```
 
-The build regenerates the original design/coverage figures, eight expanded
-figures and descriptive tables, then compiles the manuscript. Intermediate
-files stay in `paper/build/`. The bundled figures/tables are also available
+The build regenerates ten figures and the descriptive tables, then compiles
+the manuscript. Intermediate files stay in `paper/build/`. The bundled figures/tables are also available
 without running Matplotlib.
 
 ## Figures, literature and proposed studies
 
-Regenerate only the expanded figures from the saved statistics and bundled task
+Regenerate all ten figures from the saved statistics and bundled task
 descriptions:
 
 ```bash
 python paper/expanded_figures.py
 ```
 
-Each figure has vector PDF and PNG versions in `figures/`:
+Each figure has vector PDF, editable SVG, and 300-dpi PNG versions in `figures/`.
+`figure_style.py` defines the palette and physical dimensions;
+`architecture_figures.py` and `result_figures.py` draw the diagrams and charts.
+The [visual reference study](figure-design-notes.md) documents the primary-paper
+references, Applied Compute artifacts, and the design decisions.
 
 | File stem | Content |
 | --- | --- |
 | `comparison_map` | Direct, input-dot and scalar-head architecture relationships |
+| `method` | Full-gradient computation and closed-loop sampling |
+| `coverage` | Selected episode grid and original phase archives |
 | `study_design` | Training arms, seeds, solver settings and evaluation grid |
 | `success_overview` | Suite and overall success, with individual training-seed points |
 | `contrast_intervals` | All eight saved paired differences and descriptive intervals |

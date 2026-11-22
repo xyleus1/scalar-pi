@@ -2,12 +2,6 @@
 \label{sec:future}
 The following studies are proposals, not completed Scalar-Pi experiments. Each introduces a specific architectural or learning change and an equally trained direct counterpart. Figure~\ref{fig:future} summarizes the changes; Figure~\ref{fig:literature} shows selected within-paper comparisons motivating them. The external results use different models and evaluation protocols and cannot be read as a common leaderboard.
 
-\begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{figures/future_studies.pdf}
-\caption{Five proposed studies. Training-only prediction heads are removed at deployment; waypoint conditioning, invariant geometry, and convex generation change the deployed policy. These diagrams specify future experiments, not implemented or evaluated extensions of v1.}
-\label{fig:future}
-\end{figure}
-
 \subsection{Reconstruct the shape of a demonstrated movement}
 \label{sec:trajectory}
 \paragraph{Architecture and objective.}
@@ -94,12 +88,6 @@ The energy score is strictly proper for distributions with finite first moments 
 
 \paragraph{Evidence and decisive comparison.}
 ESP reports 91.8\% one-step success versus 89.1\% for its ten-step flow baseline; widening ESP raises success to 93.7\% and expert latency from 3.35 to 21.15 ms \cite{esp}. Those latency endpoints compare narrow and wide ESP, not flow and ESP. DriftingVLA reports 98.32\% versus 97.10\% with full-model adaptation and a fresh action head; its frozen-VLM expert-only variant reaches 94.57\% \cite{driftingvla}. These protocols differ from v1. Give an unrestricted direct generator the same gripper head, energy-score loss, independent noise pairs, initialization resources, and training budget. First test both generators for Gaussian target-distribution agreement and the convex generator for agreement with the analytic quadratic-cost Gaussian transport map; the unrestricted generator need not identify that coupling. Then evaluate robot success, distributional calibration, and end-to-end latency including the scalar input derivative. Only the matched direct comparison can show what convex transport adds.
-
-\begin{figure}[t]
-\centering\includegraphics[width=\linewidth]{figures/literature_evidence.pdf}
-\caption{Selected results reported within six external studies \cite{lv2026hermite,xie2026fastplans,esp,driftingvla,li2026savla,heo2026anycam}. Each panel preserves its authors' local comparison. Architectures, data, checkpoint selection, backbone updates, and evaluation protocols differ across panels. This is evidence motivating controls, not a cross-paper leaderboard or new Scalar-Pi measurement.}
-\label{fig:literature}
-\end{figure}
 
 \section{A confirmation protocol for the next study}
 \label{sec:confirmation}

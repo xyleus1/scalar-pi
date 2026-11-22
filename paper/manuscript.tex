@@ -40,7 +40,7 @@ Energy Matching studies a time-independent scalar formulation \cite{energymatchi
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{figures/comparison_map.pdf}
-\caption{Original redrawing of four computational patterns, based on OpenPI, Sun et al., and EnergyFlow \cite{openpi,composing,energyflow}. Scalar-Pi preserves the pretrained action transformer and applies a full-gradient dot readout. Arrow paths denote computation, not an equivalence of objectives, training data, or performance.}
+\caption{Four computational constructions, redrawn from OpenPI, Sun et al., and EnergyFlow \cite{openpi,composing,energyflow}. (a) A direct action velocity. (b) A U-Net input-dot potential. (c) The same dot construction applied to the pretrained action transformer. (d) A pooled scalar head whose negative gradient gives the score $s_\theta=-\nabla_xE_\theta$, rather than the flow velocity used in (a,c). Time and conditioning inputs are suppressed. The panels do not imply equivalent objectives or performance.}
 \label{fig:comparison}
 \end{figure}
 
@@ -68,7 +68,7 @@ The intervention changes computation despite preserving parameter count: each ve
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{figures/method.pdf}
-\caption{The scalar intervention reuses the complete action expert. The input-gradient path is retained through the vector output; the frozen conditioning cache is shared across solver steps. This is an architecture diagram, not a measured performance result.}
+\caption{(a) The frozen VLM supplies cached conditioning to the complete action expert. Orange denotes the direct-field readout; blue denotes the scalar intervention. The dashed return path denotes differentiation through the complete action-dependent graph, retaining both $f_\theta$ and $J_{f_\theta}^{\top}x_\tau$. (b) One or ten Euler steps produce ten actions. The five filled blocks are executed before observing and replanning; the outlined blocks are not executed in that cycle.}
 \label{fig:method}
 \end{figure}
 
@@ -89,7 +89,7 @@ This expression is singular at zero and does not by itself establish a calibrate
 \section{Experimental setup}
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{figures/study_design.pdf}
-\caption{The completed observed evaluation design. Research arms share three training seeds; the released policy is a separate single-checkpoint reference. Each checkpoint/solver setting contains 40 tasks and 50 official starts per task. Full coverage does not imply cross-device numerical acceptance.}
+\caption{(a) Each colored square is one research checkpoint: three arms crossed with seeds 17, 42, and 93. The released policy is a separate checkpoint. (b) Every checkpoint is evaluated at both solver settings on four suites of ten tasks, with 50 official starts per task: 40,000 episodes and 800 task evaluations. Complete coverage does not imply cross-device numerical acceptance.}
 \label{fig:study}
 \end{figure}
 \subsection{Controls and training}
@@ -124,7 +124,7 @@ Figure~\ref{fig:success} separates research-seed variation from the released ref
 
 \begin{figure}[t]
 \centering\includegraphics[width=\linewidth]{figures/success_overview.pdf}
-\caption{Observed success across the four suites and overall, at one and ten Euler steps. Research points show individual training seeds and group means; the released checkpoint is shown separately. The seed spread is not a confidence interval. All values use the retained complete grid and are descriptive because of unresolved hardware eligibility.}
+\caption{Observed success across the four suites and overall, at one and ten Euler steps. Shapes and colors identify models; within each research arm, points run left to right for seeds 17, 42, and 93, with a short bar at their mean. The released checkpoint is shown separately. Seed spread is not a confidence interval. All values use the retained complete grid and are descriptive because of unresolved hardware eligibility.}
 \label{fig:success}
 \end{figure}
 
@@ -156,7 +156,7 @@ The scalar constraint may aid or hinder optimization, and its higher-order compu
 \section{Reproducibility}
 The scientific worker commit is \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}. The full manifest SHA-256 begins \texttt{9e2036f5f8a78258}; dataset revision is \texttt{a4336d589d589045d1c56423ffdf3b88a0e19b1f}. The release records full hashes for the manifest, methods, configurations, statistical code, and result files. The portable dataset contains 40,000 selected episodes in CSV and JSONL, 800 curated task records, effective attempt selections, checksums, and four excluded infrastructure records. Original evidence remains unchanged. No fully hardware-accepted 40,000-episode archive is asserted.
 
-The editable source includes the pinned statistical functions, a portable descriptive-analysis entrypoint, and figure-generation code. Result figures read the saved study report; their plotted values, task labels, and source digests are exported to \texttt{figure-data.json}. Conceptual diagrams are original redrawings with citations. A separate literature ledger records versions, tables, implementation details, and the distinction between published measurements and planned experiments. The expanded paper changes presentation and future-work proposals, not the selected outcomes or original analysis.
+The editable source includes the pinned statistical functions, a portable descriptive-analysis entrypoint, and figure-generation code with a shared publication style. Result figures read the saved study report; their plotted values, task labels, and source digests are exported to \texttt{figure-data.json}. Conceptual diagrams are original redrawings with citations. A separate literature ledger records versions, tables, implementation details, and the distinction between published measurements and planned experiments. The expanded paper changes presentation and future-work proposals, not the selected outcomes or original analysis.
 
 \section{Conclusion}
 The full-gradient dot potential is a small architectural change with a substantial computational consequence. In the completed observed grid, it yields +0.30 percentage points over its reset direct-field control at ten Euler steps, with a descriptive 95\% interval of [-1.27, +1.75]. This study does not establish an improvement over that control or the released $\pihalf$ policy. Its useful result is a precise comparison and a set of testable next steps. Trajectory supervision is the first proposed experiment; geometric invariance and convex distributional transport offer more explicit reasons for scalar structure to matter, provided they beat matched direct alternatives.
@@ -183,10 +183,25 @@ Released $K=1$ minus Released $K=10$ & Secondary & 2,000 & +0.75 & [-0.15, +1.70
 
 \clearpage
 \section{All-task descriptive comparisons}
-\begin{figure}[htbp]
+\begin{figure}[!htbp]
 \centering\includegraphics[width=\linewidth,height=.83\textheight,keepaspectratio]{figures/task_heatmap_all.pdf}
 \caption{All 40 tasks at both solver settings. Each research value averages the three training seeds. The released policy remains a separate checkpoint, and all differences are descriptive. This complete view supplements the selected long-horizon examples rather than treating them as representative of every task.}
 \label{fig:alltasks}
+\end{figure}
+
+\clearpage
+\section{Planned architectures and literature context}
+\label{app:futurefigures}
+\begin{figure}[htbp]
+\centering\includegraphics[width=\linewidth]{figures/future_studies.pdf}
+\caption{Proposed architectures, not completed experiments. Dashed modules are used only in training. (a) The cubic curve is a schematic reconstruction, not recorded robot motion. (b) State history and visual-language context $c$ predict a waypoint. (c) Gradient equivariance requires orthogonal $R$ and invariance of the complete potential. (d) Shared policy features $h_t$ predict a change in frozen-encoder features; $\mathrm{sg}$ denotes stop-gradient. (e) A potential convex in noise generates continuous actions conditional on gripper schedule $G$.}
+\label{fig:future}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering\includegraphics[width=\linewidth]{figures/literature_evidence.pdf}
+\caption{Selected results reported within six external studies \cite{lv2026hermite,xie2026fastplans,esp,driftingvla,li2026savla,heo2026anycam}. Each panel preserves its authors' local comparison. Architectures, data, checkpoint selection, backbone updates, and evaluation protocols differ across panels. This is evidence motivating controls, not a cross-paper leaderboard or new Scalar-Pi measurement.}
+\label{fig:literature}
 \end{figure}
 
 \clearpage
