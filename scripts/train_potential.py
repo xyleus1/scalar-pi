@@ -180,6 +180,141 @@ def _append(path, value):
         stream.write(json.dumps(value, sort_keys=True, default=str) + "\n")
 
 
+def _load_training_model(args, config, mode, device):
+    from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
+
+    model = PI0Pytorch(config.model)  # FP32 construction before any source weights are loaded.
+    source = args.resume or args.weights or Path(config.pytorch_weight_path or "")
+    weight_file = source / ("raw_model.safetensors" if args.resume else "model.safetensors")
+    if not weight_file.is_file():
+        raise FileNotFoundError(f"Converted weights not found: {weight_file}")
+    base_conversion = None
+    if args.resume:
+        source_metadata = validate_checkpoint_metadata(
+            source,
+            velocity_mode=config.model.velocity_mode,
+            action_horizon=config.model.action_horizon,
+            action_dim=config.model.action_dim,
+        )
+        if source_metadata is None:
+            raise ValueError("Resumption requires research checkpoint metadata")
+        if source_metadata.get("run_mode") != mode:
+            raise ValueError("Resume mode differs; diagnostic checkpoints cannot start research training")
+    else:
+        source_metadata = validate_checkpoint_metadata(
+            source,
+            velocity_mode="direct",
+            action_horizon=config.model.action_horizon,
+            action_dim=config.model.action_dim,
+        )
+        if source_metadata is not None and source_metadata.get("trainer") == "potential_pi":
+            raise ValueError(
+                "Fresh research training must start from converted pi05_base, not an adapted research checkpoint"
+            )
+        base_conversion = validate_base_conversion(source, require_receipt=True)
+    safetensors.torch.load_model(model, weight_file, strict=True)
+    model.configure_expert_only()
+    model.validate_research_precision()
+    if args.resume is None and config.model.initialization == "zero_output":
+        model.zero_action_output()
+    model.to(device)
+    model.train()
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+    torch.set_float32_matmul_precision(args.matmul_precision)  # Override upstream constructor setting.
+    return model, source, weight_file, source_metadata, base_conversion
+
+
+def _resume_signature(args, config, *, code, image_id, packages, mode, schedule, device):
+    return {
+        **RESEARCH_PRECISION,
+        "config": args.config,
+        "seed": args.seed,
+        "microbatch_size": args.microbatch_size,
+        "effective_batch_size": config.batch_size,
+        "schedule": schedule,
+        "ema_decay": config.ema_decay,
+        "matmul_precision": args.matmul_precision,
+        "run_mode": mode,
+        "deterministic": args.deterministic,
+        "initialization": config.model.initialization,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "optimizer": dataclasses.asdict(config.optimizer),
+        "code_commit": code["commit"],
+        "source_snapshot_sha256": code["source_snapshot_sha256"],
+        "container_image_id": image_id,
+        "packages": packages,
+        "python": platform.python_version(),
+        "cuda_runtime": torch.version.cuda,
+        "gpu": torch.cuda.get_device_name(device),
+    }
+
+
+def _training_loader(args, config, data_config, dataset_manifest, source_metadata, consumed):
+    from openpi.training import data_loader
+
+    dataset = data_loader.create_torch_dataset(data_config, config.model.action_horizon, config.model)
+    source_dataset = dataset
+    while hasattr(source_dataset, "_dataset"):
+        source_dataset = source_dataset._dataset  # noqa: SLF001
+    if (
+        not hasattr(source_dataset, "root")
+        or source_dataset.root.resolve() != Path(dataset_manifest["dataset_root"]).resolve()
+    ):
+        raise ValueError("Loaded LeRobot root differs from the preverified dataset")
+    if data_config.repo_id != dataset_manifest["repo_id"]:
+        raise ValueError("Loaded dataset repository differs from the manifest")
+    manifest_hash = sha256_file(args.data_manifest)
+    if args.resume and source_metadata.get("data_manifest_sha256") != manifest_hash:
+        raise ValueError("Dataset manifest changed since the checkpoint")
+    dataset = data_loader.transform_dataset(dataset, data_config)
+    sampler = ResumableBatchSampler(
+        len(dataset),
+        args.microbatch_size,
+        config.batch_size,
+        args.seed,
+        start_microbatch=consumed,
+    )
+    loader_kwargs = {"multiprocessing_context": "spawn", "persistent_workers": True} if args.num_workers else {}
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_sampler=sampler,
+        num_workers=args.num_workers,
+        collate_fn=data_loader._collate_fn,  # noqa: SLF001
+        worker_init_fn=data_loader._worker_init_fn,  # noqa: SLF001
+        generator=torch.Generator().manual_seed(stable_seed(args.seed, "loader")),
+        **loader_kwargs,
+    )
+    iterator = iter(loader)
+    return dataset, iterator
+
+
+def _checkpoint_metadata(args, config, *, manifest, norm_hash, signature, image_id, source_metadata):
+    metadata = {
+        "velocity_mode": config.model.velocity_mode,
+        "initialization": config.model.initialization,
+        "freeze_vlm": True,
+        "action_horizon": config.model.action_horizon,
+        "action_dim": config.model.action_dim,
+        **RESEARCH_PRECISION,
+        "normalization_hash": norm_hash,
+        "training_seed": args.seed,
+        "code_commit": manifest["code"]["commit"],
+        "source_snapshot_sha256": manifest["code"]["source_snapshot_sha256"],
+        "base_checkpoint_hash": manifest["source_weights_sha256"],
+        "base_conversion_receipt_sha256": manifest["base_conversion_receipt_sha256"],
+        "data_manifest_sha256": manifest["data_manifest_sha256"],
+        "resume_signature": signature,
+        "container_image_id": image_id,
+        "matmul_precision": args.matmul_precision,
+        "run_mode": manifest["mode"],
+    }
+    if args.resume:
+        metadata["base_checkpoint_hash"] = source_metadata["base_checkpoint_hash"]
+        metadata["base_conversion_receipt_sha256"] = source_metadata.get("base_conversion_receipt_sha256")
+    return metadata
+
+
 def main(argv=None):
     started_unix = _PROCESS_STARTED_UNIX
     started_wall = _PROCESS_STARTED_WALL
@@ -230,10 +365,8 @@ def main(argv=None):
     import jax
 
     from openpi.models import model as model_api
-    from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
     from openpi.shared import normalize
     from openpi.training import config as configs
-    from openpi.training import data_loader
 
     config = dataclasses.replace(configs.get_config(args.config), seed=args.seed, exp_name=args.exp_name)
     if config.batch_size % args.microbatch_size:
@@ -273,45 +406,7 @@ def main(argv=None):
     torch.use_deterministic_algorithms(args.deterministic)
     torch.backends.cudnn.benchmark = False
 
-    model = PI0Pytorch(config.model)  # FP32 construction before any source weights are loaded.
-    source = args.resume or args.weights or Path(config.pytorch_weight_path or "")
-    weight_file = source / ("raw_model.safetensors" if args.resume else "model.safetensors")
-    if not weight_file.is_file():
-        raise FileNotFoundError(f"Converted weights not found: {weight_file}")
-    base_conversion = None
-    if args.resume:
-        source_metadata = validate_checkpoint_metadata(
-            source,
-            velocity_mode=config.model.velocity_mode,
-            action_horizon=config.model.action_horizon,
-            action_dim=config.model.action_dim,
-        )
-        if source_metadata is None:
-            raise ValueError("Resumption requires research checkpoint metadata")
-        if source_metadata.get("run_mode") != mode:
-            raise ValueError("Resume mode differs; diagnostic checkpoints cannot start research training")
-    else:
-        source_metadata = validate_checkpoint_metadata(
-            source,
-            velocity_mode="direct",
-            action_horizon=config.model.action_horizon,
-            action_dim=config.model.action_dim,
-        )
-        if source_metadata is not None and source_metadata.get("trainer") == "potential_pi":
-            raise ValueError(
-                "Fresh research training must start from converted pi05_base, not an adapted research checkpoint"
-            )
-        base_conversion = validate_base_conversion(source, require_receipt=True)
-    safetensors.torch.load_model(model, weight_file, strict=True)
-    model.configure_expert_only()
-    model.validate_research_precision()
-    if args.resume is None and config.model.initialization == "zero_output":
-        model.zero_action_output()
-    model.to(device)
-    model.train()
-    if args.gradient_checkpointing:
-        model.gradient_checkpointing_enable()
-    torch.set_float32_matmul_precision(args.matmul_precision)  # Override upstream constructor setting.
+    model, source, weight_file, source_metadata, base_conversion = _load_training_model(args, config, mode, device)
     expert = model.expert_modules()
     trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if {id(p) for p in trainable} != {id(p) for p in expert.parameters() if p.requires_grad}:
@@ -325,28 +420,9 @@ def main(argv=None):
     )
     ema = make_ema(expert, config.ema_decay)
     schedule = dataclasses.asdict(config.lr_schedule)
-    signature = {
-        **RESEARCH_PRECISION,
-        "config": args.config,
-        "seed": args.seed,
-        "microbatch_size": args.microbatch_size,
-        "effective_batch_size": config.batch_size,
-        "schedule": schedule,
-        "ema_decay": config.ema_decay,
-        "matmul_precision": args.matmul_precision,
-        "run_mode": mode,
-        "deterministic": args.deterministic,
-        "initialization": config.model.initialization,
-        "gradient_checkpointing": args.gradient_checkpointing,
-        "optimizer": dataclasses.asdict(config.optimizer),
-        "code_commit": code["commit"],
-        "source_snapshot_sha256": code["source_snapshot_sha256"],
-        "container_image_id": image_id,
-        "packages": packages,
-        "python": platform.python_version(),
-        "cuda_runtime": torch.version.cuda,
-        "gpu": torch.cuda.get_device_name(device),
-    }
+    signature = _resume_signature(
+        args, config, code=code, image_id=image_id, packages=packages, mode=mode, schedule=schedule, device=device
+    )
     completed = 0
     consumed = 0
     cumulative_seconds = 0.0
@@ -372,39 +448,7 @@ def main(argv=None):
     if not can_start_update(deadline, update_seconds=0, checkpoint_seconds=0):
         raise TimeoutError("Session deadline reached during model initialization")
 
-    dataset = data_loader.create_torch_dataset(data_config, config.model.action_horizon, config.model)
-    source_dataset = dataset
-    while hasattr(source_dataset, "_dataset"):
-        source_dataset = source_dataset._dataset  # noqa: SLF001
-    if (
-        not hasattr(source_dataset, "root")
-        or source_dataset.root.resolve() != Path(dataset_manifest["dataset_root"]).resolve()
-    ):
-        raise ValueError("Loaded LeRobot root differs from the preverified dataset")
-    if data_config.repo_id != dataset_manifest["repo_id"]:
-        raise ValueError("Loaded dataset repository differs from the manifest")
-    manifest_hash = sha256_file(args.data_manifest)
-    if args.resume and source_metadata.get("data_manifest_sha256") != manifest_hash:
-        raise ValueError("Dataset manifest changed since the checkpoint")
-    dataset = data_loader.transform_dataset(dataset, data_config)
-    sampler = ResumableBatchSampler(
-        len(dataset),
-        args.microbatch_size,
-        config.batch_size,
-        args.seed,
-        start_microbatch=consumed,
-    )
-    loader_kwargs = {"multiprocessing_context": "spawn", "persistent_workers": True} if args.num_workers else {}
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_sampler=sampler,
-        num_workers=args.num_workers,
-        collate_fn=data_loader._collate_fn,  # noqa: SLF001
-        worker_init_fn=data_loader._worker_init_fn,  # noqa: SLF001
-        generator=torch.Generator().manual_seed(stable_seed(args.seed, "loader")),
-        **loader_kwargs,
-    )
-    iterator = iter(loader)
+    dataset, iterator = _training_loader(args, config, data_config, dataset_manifest, source_metadata, consumed)
     if args.resume and source_metadata.get("normalization_hash") != norm_hash:
         raise ValueError("Normalization assets changed since the checkpoint")
     startup["data_seconds"] = time.perf_counter() - started_wall - sum(startup.values())
@@ -440,28 +484,15 @@ def main(argv=None):
     }
     manifest_path = output / (f"resume_{completed}_manifest.json" if args.resume else "run_manifest.json")
     write_json(manifest_path, manifest)
-    metadata = {
-        "velocity_mode": config.model.velocity_mode,
-        "initialization": config.model.initialization,
-        "freeze_vlm": True,
-        "action_horizon": config.model.action_horizon,
-        "action_dim": config.model.action_dim,
-        **RESEARCH_PRECISION,
-        "normalization_hash": norm_hash,
-        "training_seed": args.seed,
-        "code_commit": manifest["code"]["commit"],
-        "source_snapshot_sha256": manifest["code"]["source_snapshot_sha256"],
-        "base_checkpoint_hash": manifest["source_weights_sha256"],
-        "base_conversion_receipt_sha256": manifest["base_conversion_receipt_sha256"],
-        "data_manifest_sha256": manifest["data_manifest_sha256"],
-        "resume_signature": signature,
-        "container_image_id": image_id,
-        "matmul_precision": args.matmul_precision,
-        "run_mode": manifest["mode"],
-    }
-    if args.resume:
-        metadata["base_checkpoint_hash"] = source_metadata["base_checkpoint_hash"]
-        metadata["base_conversion_receipt_sha256"] = source_metadata.get("base_conversion_receipt_sha256")
+    metadata = _checkpoint_metadata(
+        args,
+        config,
+        manifest=manifest,
+        norm_hash=norm_hash,
+        signature=signature,
+        image_id=image_id,
+        source_metadata=source_metadata,
+    )
     target = args.profile_warmup + args.profile_updates if args.profile_updates else updates
     timings = []
     all_update_seconds = []

@@ -4,142 +4,35 @@ The official runner supplies observations and success labels. These helpers only
 define identifiers, audit a declared experiment, and summarize its results.
 """
 
-# ruff: noqa: UP038 -- Imported by the Python 3.8 simulator; runtime isinstance unions need Python 3.10.
+# ruff: noqa: PLC0414, UP038 -- Explicit API reexports; also imported by the Python 3.8 simulator.
 from __future__ import annotations
 
-from collections import Counter
 from collections import defaultdict
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
-import random
-import statistics
-import subprocess
 from typing import Any
 
+from openpi.research.evaluation_records import PROTOCOL_ID as PROTOCOL_ID
+from openpi.research.evaluation_records import append_episode as append_episode
+from openpi.research.evaluation_records import content_digest as content_digest
+from openpi.research.evaluation_records import episode_id as episode_id
+from openpi.research.evaluation_records import file_digest as file_digest
+from openpi.research.evaluation_records import paired_noise_seed as paired_noise_seed
+from openpi.research.evaluation_records import read_episodes as read_episodes
+from openpi.research.evaluation_records import source_identity as source_identity
+from openpi.research.evaluation_records import suite_provenance as suite_provenance
+from openpi.research.evaluation_records import tree_digest as tree_digest
+from openpi.research.evaluation_records import write_provenance as write_provenance
+from openpi.research.evaluation_statistics import _percentile as _percentile
+from openpi.research.evaluation_statistics import paired_bootstrap as paired_bootstrap
+from openpi.research.evaluation_statistics import summarize as summarize
 from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520, "libero_90": 400}
-PROTOCOL_ID = "openpi-libero-paired-v2"
 POLICY_FAILURE_TAGS = {"timeout", "invalid_actions"}
-
-
-def content_digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    ).hexdigest()
-
-
-def file_digest(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def tree_digest(root: str | Path) -> dict[str, Any]:
-    root = Path(root)
-    files = {str(path.relative_to(root)): file_digest(path) for path in sorted(root.rglob("*")) if path.is_file()}
-    if not files:
-        raise ValueError(f"No simulator assets found in {root}")
-    return {"files": len(files), "sha256": content_digest(files)}
-
-
-def source_identity(root: str | Path) -> dict[str, Any]:
-    """Record actual tracked source bytes, including a mounted checkout's local changes."""
-    root = Path(root)
-
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
-
-    files = {
-        name: file_digest(root / name)
-        for name in git("ls-files").splitlines()
-        if name.endswith((".py", ".json", ".toml", ".lock")) and (root / name).is_file()
-    }
-    return {
-        "commit": git("rev-parse", "HEAD"),
-        "tracked_changes": git("status", "--porcelain", "--untracked-files=no"),
-        "source_sha256": content_digest(files),
-    }
-
-
-def write_provenance(log_path: str | Path, provenance: dict[str, Any]) -> str:
-    """Write one immutable sidecar per suite attempt, not one large payload per episode."""
-    path = Path(log_path).with_suffix(".provenance.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as stream:
-        json.dump(provenance, stream, indent=2, sort_keys=True, allow_nan=False)
-        stream.write("\n")
-    return content_digest(provenance)
-
-
-def suite_provenance(*, server_metadata: dict, settings: dict, tasks: list[dict], simulator_paths: dict) -> dict:
-    """Bind an evaluation attempt to model bytes, simulator assets, and numerical settings."""
-    root = Path(__file__).resolve().parents[3]
-    simulator_root = root / "third_party/libero"
-    return {
-        "schema_version": 1,
-        "protocol_id": PROTOCOL_ID,
-        "server_metadata": server_metadata,
-        "source": source_identity(root),
-        "simulator_commit": subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=simulator_root, check=True, capture_output=True, text=True
-        ).stdout.strip(),
-        "simulator_assets": {name: tree_digest(path) for name, path in sorted(simulator_paths.items())},
-        "container_image": os.environ.get("SCALAR_PI_SIMULATOR_IMAGE", ""),
-        "settings": settings,
-        "tasks": tasks,
-    }
-
-
-def paired_noise_seed(seed: int, task: str, initial_state: int, query_index: int) -> int:
-    """Stable uint32; intentionally independent of model, K, and training seed."""
-    if initial_state < 0 or query_index < 0:
-        raise ValueError("Initial state and query index must be nonnegative")
-    payload = json.dumps([int(seed), str(task), int(initial_state), int(query_index)], separators=(",", ":"))
-    return int.from_bytes(hashlib.sha256(payload.encode("utf-8")).digest()[:4], "big")
-
-
-def episode_id(suite: str, task_id: int, initial_state_id: int, rollout_seed: int) -> str:
-    return f"{suite}/task-{task_id:02d}/init-{initial_state_id:03d}/env-{rollout_seed}"
-
-
-def append_episode(path: str | Path, record: dict[str, Any]) -> None:
-    """Append one completed episode; reject non-JSON values and NaN before writing."""
-    line = json.dumps(record, sort_keys=True, allow_nan=False)
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as stream:
-        stream.write(line + "\n")
-        stream.flush()
-
-
-def read_episodes(paths: list[str | Path]) -> list[dict[str, Any]]:
-    records = []
-    for path in paths:
-        sidecar = Path(path).with_suffix(".provenance.json")
-        provenance = json.loads(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else None
-        with Path(path).open(encoding="utf-8") as stream:
-            for line_no, line in enumerate(stream, 1):
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                    if not isinstance(record, dict):
-                        raise ValueError("Episode must be an object")
-                    if record.get("provenance_sha256"):
-                        if provenance is None or content_digest(provenance) != record["provenance_sha256"]:
-                            raise ValueError("Missing or changed provenance sidecar")
-                        record["_provenance"] = provenance
-                    records.append(record)
-                except (ValueError, TypeError) as exc:
-                    raise ValueError(f"Invalid episode at {path}:{line_no}: {exc}") from exc
-    return records
 
 
 def validate_manifest(manifest: dict[str, Any]) -> None:
@@ -623,168 +516,3 @@ def validate_results(
     if missing:
         raise ValueError(f"Incomplete matrix: {len(missing)} missing episodes; example {min(missing)}")
     return {"episodes": len(records), "cells": len(cells), "checkpoints": len(variants)}
-
-
-def _percentile(values: list[float], probability: float) -> float:
-    ordered = sorted(values)
-    position = (len(ordered) - 1) * probability
-    low = math.floor(position)
-    high = math.ceil(position)
-    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
-
-
-def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per-checkpoint/seed/suite summaries; released references stay separate."""
-    grouped = defaultdict(list)
-    for record in records:
-        grouped[(record["checkpoint_id"], record["num_steps"], record["suite"])].append(record)
-    result = {"trained": [], "reference": []}
-    for (checkpoint_id, steps, suite), rows in sorted(grouped.items()):
-        first = rows[0]
-        timings = defaultdict(list)
-        for row in rows:
-            for timing in row.get("latencies", []):
-                for name, value in timing.items():
-                    if isinstance(value, (float, int)) and math.isfinite(value):
-                        timings[name].append(float(value))
-        item = {
-            "checkpoint_id": checkpoint_id,
-            "group": first["group"],
-            "training_seed": first.get("training_seed"),
-            "num_steps": steps,
-            "suite": suite,
-            "episodes": len(rows),
-            "successes": sum(row["success"] for row in rows),
-            "success_rate": statistics.mean(float(row["success"]) for row in rows),
-            "failure_tags": dict(Counter(tag for row in rows for tag in row.get("failure_tags", []))),
-            "artifact_errors": dict(Counter(error["kind"] for row in rows for error in row.get("artifact_errors", []))),
-            "latency_ms": {
-                name: {"count": len(values), "mean": statistics.mean(values), "p95": _percentile(values, 0.95)}
-                for name, values in sorted(timings.items())
-            },
-        }
-        result["reference" if first.get("reference", False) else "trained"].append(item)
-    checkpoint_groups = defaultdict(list)
-    for section in ("trained", "reference"):
-        for item in result[section]:
-            checkpoint_groups[(section, item["checkpoint_id"], item["num_steps"])].append(item)
-    result["checkpoint_macro_averages"] = [
-        {
-            "reference": section == "reference",
-            "checkpoint_id": checkpoint_id,
-            "num_steps": steps,
-            "group": items[0]["group"],
-            "training_seed": items[0]["training_seed"],
-            "suites": [item["suite"] for item in items],
-            "success_rate": statistics.mean(item["success_rate"] for item in items),
-        }
-        for (section, checkpoint_id, steps), items in sorted(checkpoint_groups.items())
-    ]
-    task_groups = defaultdict(list)
-    for row in records:
-        task_groups[(row["checkpoint_id"], row["num_steps"], row["suite"], row["task_id"])].append(row)
-    result["tasks"] = [
-        {
-            "checkpoint_id": checkpoint_id,
-            "num_steps": steps,
-            "suite": suite,
-            "task_id": task,
-            "episodes": len(rows),
-            "success_rate": statistics.mean(float(row["success"]) for row in rows),
-        }
-        for (checkpoint_id, steps, suite, task), rows in sorted(task_groups.items())
-    ]
-    return result
-
-
-def paired_bootstrap(
-    left: list[dict[str, Any]],
-    right: list[dict[str, Any]],
-    *,
-    resamples: int = 10000,
-    random_seed: int = 0,
-) -> dict[str, Any]:
-    """Paired seed/state bootstrap for equally weighted, fixed benchmark tasks.
-
-    Initial-state draws are shared across sampled training seeds and both methods.
-    A one-seed interval measures state variation, not training-seed uncertainty.
-    """
-    if resamples < 100:
-        raise ValueError("Require at least 100 resamples")
-
-    def index(rows):
-        indexed = {}
-        for row in rows:
-            key = (row.get("training_seed"), row["suite"], row["task_id"], row["initial_state_id"])
-            if key in indexed:
-                raise ValueError(f"Duplicate paired key: {key}; select one group and K per side")
-            indexed[key] = row
-        return indexed
-
-    li, ri = index(left), index(right)
-    if not li or li.keys() != ri.keys():
-        raise ValueError("Paired comparison requires identical nonempty seed/task/initial-state keys")
-    for key in li:
-        for field in (
-            "episode_id",
-            "rollout_seed",
-            "paired_noise_seed",
-            "protocol_id",
-            "replan_steps",
-            "action_horizon",
-        ):
-            if li[key].get(field) != ri[key].get(field):
-                raise ValueError(f"Pairing mismatch in {field}: {key}")
-        if bool(li[key].get("reference", False)) != bool(ri[key].get("reference", False)):
-            raise ValueError("Do not treat a released reference as an independently trained seed")
-    seeds = sorted({key[0] for key in li}, key=str)
-    grid = defaultdict(lambda: defaultdict(set))
-    for _, suite, task, state in li:
-        grid[suite][task].add(state)
-    for seed in seeds:
-        for suite, tasks in grid.items():
-            for task, states in tasks.items():
-                if any((seed, suite, task, state) not in li for state in states):
-                    raise ValueError("Unbalanced training seed/task/episode grid")
-    differences = {key: float(li[key]["success"]) - float(ri[key]["success"]) for key in li}
-    rng = random.Random(random_seed)
-    draws = []
-    suite_names = sorted(grid)
-    for _ in range(resamples):
-        sampled_seeds = rng.choices(seeds, k=len(seeds))
-        suite_means = []
-        for suite in suite_names:
-            tasks = sorted(grid[suite])
-            task_means = []
-            for task in tasks:
-                states = sorted(grid[suite][task])
-                sampled_states = rng.choices(states, k=len(states))
-                task_means.append(
-                    sum(differences[(seed, suite, task, state)] for seed in sampled_seeds for state in sampled_states)
-                    / (len(sampled_seeds) * len(sampled_states))
-                )
-            suite_means.append(statistics.mean(task_means))
-        draws.append(statistics.mean(suite_means))
-    ci95 = [_percentile(draws, 0.025), _percentile(draws, 0.975)]
-    point = statistics.mean(
-        statistics.mean(
-            statistics.mean(differences[(seed, suite, task, state)] for seed in seeds for state in states)
-            for task, states in grid[suite].items()
-        )
-        for suite in suite_names
-    )
-    return {
-        "difference_left_minus_right": point,
-        "ci95": ci95,
-        "resamples": resamples,
-        "random_seed": random_seed,
-        "training_seeds": seeds,
-        "paired_episodes": len(li),
-        "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
-        "training_seed_variability_estimated": len(seeds) > 1 and seeds != [None],
-        "scope": (
-            "conditional on one checkpoint; training-seed variability is not estimated"
-            if len(seeds) == 1
-            else "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate"
-        ),
-    }

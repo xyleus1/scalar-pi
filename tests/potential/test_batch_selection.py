@@ -181,7 +181,19 @@ def test_help_works_in_a_clean_python_process():
 
 
 @pytest.mark.parametrize(
-    "change", [None, "weights", "manifest", "source", "commit", "dirty", "image", "norms", "stale_precision", "missing_precision"]
+    "change",
+    [
+        None,
+        "weights",
+        "manifest",
+        "source",
+        "commit",
+        "dirty",
+        "image",
+        "norms",
+        "stale_precision",
+        "missing_precision",
+    ],
 )
 def test_verify_existing_selection_checks_actual_inputs_without_cuda(tmp_path, monkeypatch, change):
     module, args = load_script(), arguments(tmp_path)

@@ -1,7 +1,6 @@
 """Actual reduced Gemma/PI05 paths; required in the candidate model image."""
 
 import pytest
-from test_pi05_integration import tiny_model  # noqa: F401 -- shared actual-model fixture
 import torch
 from transformers.cache_utils import DynamicCache
 from transformers.models.gemma import modeling_gemma
@@ -14,7 +13,7 @@ from openpi.research.uncached_reference import uncached_reference
 
 
 @pytest.mark.parametrize("masked", [False, True])
-def test_fp32_oracle_matches_native_joint_cache_and_all_solver_states(tiny_model, monkeypatch, masked):  # noqa: F811
+def test_fp32_oracle_matches_native_joint_cache_and_all_solver_states(tiny_model, monkeypatch, masked):
     model, observation = tiny_model
     model.velocity_mode = "direct"
     model.eval()
@@ -50,7 +49,7 @@ def test_fp32_oracle_matches_native_joint_cache_and_all_solver_states(tiny_model
             assert array_error(ref[:, -1], sampled, atol=1e-4, rtol=1e-4)["passed"]
 
 
-def test_hybrid_oracle_uses_branch_dtypes_without_cache_or_joint_api(tiny_model, monkeypatch):  # noqa: F811
+def test_hybrid_oracle_uses_branch_dtypes_without_cache_or_joint_api(tiny_model, monkeypatch):
     model, observation = tiny_model
     model.configure_expert_only()
     model.validate_research_precision()
@@ -83,7 +82,7 @@ def test_hybrid_oracle_uses_branch_dtypes_without_cache_or_joint_api(tiny_model,
             torch.testing.assert_close(left, right, atol=0, rtol=0)
 
 
-def test_hybrid_corrupted_cache_is_detected_by_independent_oracle(tiny_model):  # noqa: F811
+def test_hybrid_corrupted_cache_is_detected_by_independent_oracle(tiny_model):
     model, observation = tiny_model
     model.configure_expert_only()
     model.velocity_mode = "direct"
@@ -98,7 +97,7 @@ def test_hybrid_corrupted_cache_is_detected_by_independent_oracle(tiny_model):  
     assert not array_error(damaged.numpy(), oracle.numpy(), atol=1e-4, rtol=1e-4)["passed"]
 
 
-def test_hybrid_oracle_supports_full_action_double_backward(tiny_model):  # noqa: F811
+def test_hybrid_oracle_supports_full_action_double_backward(tiny_model):
     model, observation = tiny_model
     model.configure_expert_only()
     model.eval()

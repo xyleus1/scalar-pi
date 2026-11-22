@@ -219,6 +219,16 @@ def _qualify(args, report):
         }
     )
 
+    _check_derivatives(model, observation, actions, noise, time, device, report)
+    if args.math_only:
+        return
+
+    _check_inference_memory(args, model, observation, noise, device, report)
+
+
+def _check_derivatives(model, observation, actions, noise, time, device, report):
+    import torch
+
     vlm_digest = _parameter_digest(model.paligemma_with_expert.paligemma)
     model.train()
     torch.cuda.synchronize(device)
@@ -317,8 +327,10 @@ def _qualify(args, report):
         raise RuntimeError("Frozen VLM weights changed during derivative qualification")
     report["checks"]["frozen_vlm_weights_unchanged"] = True
     del head_weight, head_bias, context
-    if args.math_only:
-        return
+
+
+def _check_inference_memory(args, model, observation, noise, device, report):
+    import torch
 
     memory = {}
     for steps in (1, 10):
@@ -416,7 +428,9 @@ def _qualify_policy(args, report):
         "passed": True,
         "corpus_sha256": file_digest(args.corpus),
         "num_steps": serving,
-        "scope": "direct base at hybrid research precision" if args.checkpoint_kind == "base" else "trained potential checkpoint",
+        "scope": "direct base at hybrid research precision"
+        if args.checkpoint_kind == "base"
+        else "trained potential checkpoint",
     }
     report["corpus_sha256"] = file_digest(args.corpus)
     report["normalization_sha256"] = serving["1"]["policy"]["normalization_sha256"]

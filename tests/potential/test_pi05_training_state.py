@@ -1,9 +1,8 @@
-"""Test accumulation and exact restart on the real, reduced-size π0.5 graph."""
+"""Test accumulation and exact restart on the real, reduced-size Ï€0.5 graph."""
 
 import copy
 
 import pytest
-from test_pi05_integration import tiny_model  # noqa: F401 -- shared production-model fixture.
 import torch
 from transformers.cache_utils import DynamicCache
 
@@ -18,7 +17,7 @@ from openpi.training.potential import torch_rng_scope
 
 
 @pytest.mark.parametrize("mode", ["direct", "potential_dot"])
-def test_actual_pi05_accumulation_matches_full_preprocessed_batch(tiny_model, mode):  # noqa: F811
+def test_actual_pi05_accumulation_matches_full_preprocessed_batch(tiny_model, mode):
     model, observation = tiny_model
     model.velocity_mode = mode
     model.train()
@@ -44,7 +43,7 @@ def test_actual_pi05_accumulation_matches_full_preprocessed_batch(tiny_model, mo
             torch.testing.assert_close(parameter.grad, expected[name], atol=1e-4, rtol=1e-4)
 
 
-def test_actual_pi05_restart_preserves_samples_corruption_optimizer_and_ema(tiny_model, tmp_path):  # noqa: F811
+def test_actual_pi05_restart_preserves_samples_corruption_optimizer_and_ema(tiny_model, tmp_path):
     model, observation = tiny_model
     torch.set_float32_matmul_precision("highest")
     model.configure_expert_only()

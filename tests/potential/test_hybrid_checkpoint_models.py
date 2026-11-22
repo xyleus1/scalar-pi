@@ -5,7 +5,6 @@ import copy
 import pytest
 from safetensors import safe_open
 import safetensors.torch
-from test_pi05_integration import tiny_model  # noqa: F401 -- shared real production-model fixture.
 import torch
 
 from openpi.shared.potential_checkpoint import validate_checkpoint_metadata
@@ -73,7 +72,7 @@ def update(model, observation, actions, optimizer, ema, *, number, cursor):
 
 
 @pytest.mark.parametrize("arm", ["B0", "B1", "P"])
-def test_mixed_native_headers_ema_aliases_and_exact_next_update(tiny_model, tmp_path, arm):  # noqa: F811
+def test_mixed_native_headers_ema_aliases_and_exact_next_update(tiny_model, tmp_path, arm):
     model, observation = tiny_model
     prepare(model, arm)
     initial = copy.deepcopy(model)
@@ -166,7 +165,7 @@ def test_mixed_native_headers_ema_aliases_and_exact_next_update(tiny_model, tmp_
         assert_state_equal(values, resumed_optimizer.state_dict()["state"][key])
 
 
-def test_failed_mixed_ema_save_restores_raw_live_weights(tiny_model, tmp_path, monkeypatch):  # noqa: F811
+def test_failed_mixed_ema_save_restores_raw_live_weights(tiny_model, tmp_path, monkeypatch):
     model, observation = tiny_model
     prepare(model, "P")
     optimizer = torch.optim.AdamW(model.expert_modules().parameters(), lr=1e-3)
