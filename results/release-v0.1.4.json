@@ -1,0 +1,58 @@
+{
+  "kind": "paper_figure_revision_v1",
+  "version": "v0.1.4",
+  "title": "Scalar-potential action experts in π₀.₅",
+  "author": "Nima Kamali and Mert Turna",
+  "date": "2026-11-22",
+  "pages": 14,
+  "figures": 4,
+  "redesigned_figures": 4,
+  "removed_paper_figures": 6,
+  "figure_formats": [
+    "pdf",
+    "svg",
+    "png"
+  ],
+  "planned_studies": 5,
+  "new_experiments": false,
+  "new_statistical_estimates": false,
+  "source_commit": "c7b1e6b1498244052821103fcce18d7267c90ae1",
+  "scientific_worker_commit": "a9c0bdbf5f20356246f25ec303c51e466fa4c3a3",
+  "hardware_acceptance_claimed": false,
+  "data": {
+    "bytes": 133911028,
+    "path": "scalar-pi-data.zip",
+    "sha256": "5a533375c4aa4175bf97052a36039f917216c824a8477037b65923c98ee40454",
+    "url": "https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip",
+    "version": "v0.1.1",
+    "episode_count": 40000,
+    "reused_without_changes": true
+  },
+  "assets": [
+    {
+      "path": "scalar-pi-paper.pdf",
+      "bytes": 489648,
+      "sha256": "3128f10f4a10c0481b8af702b34873c54ccfcb30ab4858e52d95dda150e1cd88"
+    },
+    {
+      "path": "scalar-pi-source.zip",
+      "bytes": 613232,
+      "sha256": "c8a88a1d8850baf97547c3634caaf348a12f6569dce48412db4656144113cb03"
+    },
+    {
+      "path": "scalar-pi-figures.zip",
+      "bytes": 509847,
+      "sha256": "4cadbc87f19b014268666422ecb5e8fb370c55468a6b2f401aff923aafb07e16"
+    },
+    {
+      "path": "data-reference.json",
+      "bytes": 322,
+      "sha256": "5f84be9e92f46036b4d445ad00ceda344b2f63bcc6dc8a0bde64789ecbd9af90"
+    }
+  ],
+  "checksums": {
+    "path": "checksums.sha256",
+    "bytes": 351,
+    "sha256": "e40d4331fa1c2a98412750eba428a99580e8e3578504845a6cdbcd4f46bc1917"
+  }
+}
