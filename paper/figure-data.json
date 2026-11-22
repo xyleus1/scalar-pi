@@ -1,0 +1,5560 @@
+{
+  "analysis_status": "descriptive_only_not_hardware_qualified",
+  "architecture_sources": {
+    "direct_openpi": "https://github.com/Physical-Intelligence/openpi/tree/215abfb217dbac7d5f1273282331b9b1866c0479",
+    "energyflow_scalar_head": "https://arxiv.org/html/2605.00623v2",
+    "prior_input_dot": "https://arxiv.org/html/2608.18004v1",
+    "scalar_pi": "src/openpi/models_pytorch/potential.py"
+  },
+  "author": "Nima Kamali",
+  "captions": {
+    "comparison_map": "Original architectural comparison. OpenPI predicts a direct action velocity; Scalar-Pi retains its transformer vector output but differentiates an input-dot scalar. The input-dot construction also appears in a U-Net setting in Sun et al.; EnergyFlow instead pools temporal features into a scalar head and uses a negative action gradient as a score. These are different implementations and objectives, not a controlled empirical comparison. The scalar-potential construction itself is not claimed as new.",
+    "contrast_intervals": "Eight pre-specified descriptive paired contrasts copied exactly from the saved report. Points are percentage-point differences and bars are the original 95% percentile-bootstrap intervals (10,000 resamples, seed 0). The primary P-B1,K10 contrast is highlighted. Intervals are not adjusted for multiplicity and do not resolve the study's hardware-eligibility limitation.",
+    "future_studies": "Proposed studies only: training-time trajectory supervision, event/waypoint conditioning, invariant-potential geometry, future-feature prediction, and a discrete-gripper/convex-noise generator. None is evaluated in this report. Every proposal requires matched direct/scalar controls and task-success evaluation; smoothness, safety and distributional coverage require their own measured endpoints.",
+    "literature_evidence": "Within-paper results reported by other studies, redrawn from their numerical reports. Each panel uses its own task/data/model protocol; gains are not pooled and the panels are not a cross-paper leaderboard. There is no Scalar-Pi bar. These results motivate controlled follow-up experiments rather than predict the effect of adding a component here.",
+    "study_design": "Factorial protocol: three trained arms at three seeds, one released reference, two Euler-step counts, four suites of ten tasks, and fifty initial states per task. Nine trained checkpoints contribute 36,000 episodes and the single released checkpoint contributes 4,000. B1 and P share reset output initialization; B0 retains the pretrained output. Hardware eligibility remains unresolved.",
+    "success_overview": "Observed success by suite and solver steps. For trained arms, shapes mark seeds 17, 42, 93 and short horizontal bars show their mean; the released reference has one checkpoint and therefore one point, not three seeds. Overall rates weight the four equally sized suites equally. No confidence intervals are constructed from these seed points.",
+    "task_differences": "Exploratory task heterogeneity on the ten long-horizon tasks. Heatmap cells show trained-seed mean P minus B1 or the single released reference, in percentage points. The two selected K10 tasks reproduce the quoted Moka 53.3% versus 38% and mugs 64% versus 100% rates. Seed-level points expose variation; the horizontal released line is one checkpoint, not a repeated seed. Selection is descriptive and does not support a mechanistic smoothness explanation.",
+    "task_heatmap_all": "All forty benchmark tasks, with P minus B1 and P minus the released checkpoint at both solver settings. Trained-arm rates are averages over three seeds and fifty initial states per seed; reference rates use one checkpoint and fifty initial states. Cells show percentage-point differences, not task-level confidence intervals. Task labels are abbreviated from the public episode descriptions; the complete descriptions and numeric cells are in figure-data.json."
+  },
+  "contrasts": [
+    {
+      "ci95": [
+        -0.011833333333333333,
+        0.02
+      ],
+      "difference_left_minus_right": 0.004,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "architecture",
+      "left": {
+        "group": "P",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 1800,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4200,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 0,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 6000
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B1",
+        "num_steps": 1
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        -0.012666666666666666,
+        0.0175
+      ],
+      "difference_left_minus_right": 0.002999999999999999,
+      "endpoint": "primary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "architecture",
+      "left": {
+        "group": "P",
+        "num_steps": 10
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-PCIE-40GB",
+            "pairs": 1150,
+            "right": "NVIDIA A100-PCIE-40GB"
+          },
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 750,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4100,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 0,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 6000
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B1",
+        "num_steps": 10
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        -0.0019999999999999996,
+        0.025500000000000002
+      ],
+      "difference_left_minus_right": 0.011833333333333335,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "architecture",
+      "left": {
+        "group": "P",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 1800,
+            "right": "NVIDIA H100 PCIe"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4200,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 1800,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 4200
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B0",
+        "num_steps": 1
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        -0.005833333333333333,
+        0.0225
+      ],
+      "difference_left_minus_right": 0.008,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "architecture",
+      "left": {
+        "group": "P",
+        "num_steps": 10
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-PCIE-40GB",
+            "pairs": 1150,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 750,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 100,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4000,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 1250,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 4750
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B0",
+        "num_steps": 10
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        0.002666666666666666,
+        0.034833333333333334
+      ],
+      "difference_left_minus_right": 0.018666666666666668,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "integration_steps",
+      "left": {
+        "group": "B0",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 2000,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4000,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 2000,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 4000
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B0",
+        "num_steps": 10
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        0.0105,
+        0.03233333333333333
+      ],
+      "difference_left_minus_right": 0.021500000000000002,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "integration_steps",
+      "left": {
+        "group": "B1",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 1050,
+            "right": "NVIDIA A100-PCIE-40GB"
+          },
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 750,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 100,
+            "right": "NVIDIA A100-PCIE-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4100,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 1150,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 4850
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "B1",
+        "num_steps": 10
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        0.0105,
+        0.034333333333333334
+      ],
+      "difference_left_minus_right": 0.022500000000000003,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "integration_steps",
+      "left": {
+        "group": "P",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 1050,
+            "right": "NVIDIA A100-PCIE-40GB"
+          },
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 750,
+            "right": "NVIDIA A100-SXM4-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 100,
+            "right": "NVIDIA A100-PCIE-40GB"
+          },
+          {
+            "left": "NVIDIA H100 PCIe",
+            "pairs": 4100,
+            "right": "NVIDIA H100 PCIe"
+          }
+        ],
+        "different_runtime_pairs": 1150,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 6000,
+        "same_runtime_pairs": 4850
+      },
+      "paired_episodes": 6000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "P",
+        "num_steps": 10
+      },
+      "scope": "training-seed and initial-state variation on the fixed benchmark tasks; few-seed estimate",
+      "training_seed_variability_estimated": true,
+      "training_seeds": [
+        17,
+        42,
+        93
+      ]
+    },
+    {
+      "ci95": [
+        -0.0015000000000000005,
+        0.017
+      ],
+      "difference_left_minus_right": 0.007500000000000001,
+      "endpoint": "secondary",
+      "interpretation": "descriptive; hardware eligibility unresolved",
+      "kind": "integration_steps",
+      "left": {
+        "group": "reference",
+        "num_steps": 1
+      },
+      "method": "paired training-seed/initial-state percentile bootstrap; fixed equally weighted benchmark tasks",
+      "observed_hardware_support": {
+        "device_pairs": [
+          {
+            "left": "NVIDIA A100-SXM4-40GB",
+            "pairs": 2000,
+            "right": "NVIDIA A100-SXM4-40GB"
+          }
+        ],
+        "different_runtime_pairs": 0,
+        "hardware_acceptance_claimed": false,
+        "paired_episodes": 2000,
+        "same_runtime_pairs": 2000
+      },
+      "paired_episodes": 2000,
+      "random_seed": 0,
+      "resamples": 10000,
+      "right": {
+        "group": "reference",
+        "num_steps": 10
+      },
+      "scope": "conditional on one checkpoint; training-seed variability is not estimated",
+      "training_seed_variability_estimated": false,
+      "training_seeds": [
+        null
+      ]
+    }
+  ],
+  "episode_count": 40000,
+  "hardware_acceptance_claimed": false,
+  "interpretation": "Seed points are observed rates, not confidence intervals. Task case studies are exploratory. Success differences do not identify a mechanism or establish motion smoothness.",
+  "kind": "scalar_pi_expanded_figure_data_v1",
+  "license": "CC-BY-4.0",
+  "literature_evidence": [
+    {
+      "baseline": 95.9,
+      "baseline_label": "pi0.5",
+      "name": "Hermite",
+      "protocol": "LIBERO / pi0.5",
+      "protocol_detail": "Four-suite LIBERO average; 50 rollouts per task, 40 tasks, 2,000 episodes per method; T10/W5, ten denoising steps, 30,000 training updates.",
+      "source": "https://arxiv.org/html/2608.01265v2",
+      "source_location": "Tables II and V",
+      "status": "primary_verified",
+      "variant": 98.7,
+      "variant_label": "+ Hermite"
+    },
+    {
+      "baseline": 95.85,
+      "baseline_label": "Suffix\nconditioning",
+      "name": "Faithful Plans",
+      "protocol": "Custom Block-AR comparison",
+      "protocol_detail": "Custom Block-AR + suffix conditioning versus Custom Block-AR + NGM; 500 episodes per suite; one training run per variant. Not a vanilla pi0.5 baseline.",
+      "source": "https://arxiv.org/html/2609.30833v1",
+      "source_location": "Table 2",
+      "status": "primary_verified",
+      "variant": 98.45,
+      "variant_label": "NGM"
+    },
+    {
+      "baseline": 89.1,
+      "baseline_label": "10-step flow",
+      "name": "ESP",
+      "protocol": "Authors' flow comparison",
+      "protocol_detail": "Authors' ten-step flow baseline versus one-step ESP; reported values 89.1 +/- 1.2 and 91.8 +/- 1.4. The wide ESP variant in Table II is a separate configuration, not this plotted comparison.",
+      "source": "https://arxiv.org/html/2610.07696v1",
+      "source_location": "Figure 4",
+      "status": "primary_verified",
+      "variant": 91.8,
+      "variant_label": "1-step ESP"
+    },
+    {
+      "baseline": 97.1,
+      "baseline_label": "pi0.5",
+      "name": "Drifting",
+      "protocol": "Full-model pi0.5",
+      "protocol_detail": "Full-model updates with a fresh head; pi0.5 97.10 versus drifting 98.32. Frozen-VLM expert-only drifting is a different setting and reports 94.57, not the plotted 98.32.",
+      "source": "https://arxiv.org/html/2608.29749v1",
+      "status": "primary_verified",
+      "variant": 98.32,
+      "variant_label": "Drifting"
+    },
+    {
+      "baseline": 48.3,
+      "baseline_label": "Reduced\nGR00T N1.5",
+      "name": "SAVLA",
+      "protocol": "10% GR00T data",
+      "protocol_detail": "Identical ten-percent per-task data; budget-matched reduced GR00T N1.5 baseline; 200 evaluation episodes, three seeds.",
+      "source": "https://arxiv.org/html/2609.16641v1",
+      "source_location": "Table V and section V-D",
+      "status": "primary_verified",
+      "variant": 57.1,
+      "variant_label": "SAVLA"
+    },
+    {
+      "baseline": 69.9,
+      "baseline_label": "pi0.5",
+      "intermediate": 87.2,
+      "intermediate_label": "View augmentation",
+      "name": "AnyCam",
+      "protocol": "pi0.5 / unseen agent camera",
+      "protocol_detail": "Unseen agent-camera perturbations, small/medium/large levels, averaged across four suites. pi0.5, view-augmented pi0.5, and AnyCam + frozen pi0.5. Different from standard LIBERO camera evaluation.",
+      "source": "https://arxiv.org/html/2603.05868v3",
+      "source_location": "Table I",
+      "status": "primary_verified",
+      "variant": 94.5,
+      "variant_label": "AnyCam"
+    }
+  ],
+  "new_statistics_estimated": false,
+  "overall_success": [
+    {
+      "checkpoint_id": "released-pi05-libero",
+      "group": "reference",
+      "num_steps": 1,
+      "reference": true,
+      "success_rate": 0.966,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": null
+    },
+    {
+      "checkpoint_id": "released-pi05-libero",
+      "group": "reference",
+      "num_steps": 10,
+      "reference": true,
+      "success_rate": 0.9585,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": null
+    },
+    {
+      "checkpoint_id": "B0-seed17",
+      "group": "B0",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9205,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "B0-seed17",
+      "group": "B0",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.911,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "B0-seed42",
+      "group": "B0",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9295,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "B0-seed42",
+      "group": "B0",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.8965,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "B0-seed93",
+      "group": "B0",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9235,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    },
+    {
+      "checkpoint_id": "B0-seed93",
+      "group": "B0",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.91,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    },
+    {
+      "checkpoint_id": "B1-seed17",
+      "group": "B1",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9395,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "B1-seed17",
+      "group": "B1",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.9205,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "B1-seed42",
+      "group": "B1",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9279999999999999,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "B1-seed42",
+      "group": "B1",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.9045,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "B1-seed93",
+      "group": "B1",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9295,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    },
+    {
+      "checkpoint_id": "B1-seed93",
+      "group": "B1",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.9075,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    },
+    {
+      "checkpoint_id": "P-seed17",
+      "group": "P",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9305,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "P-seed17",
+      "group": "P",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.911,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 17
+    },
+    {
+      "checkpoint_id": "P-seed42",
+      "group": "P",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.9325,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "P-seed42",
+      "group": "P",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.9135,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 42
+    },
+    {
+      "checkpoint_id": "P-seed93",
+      "group": "P",
+      "num_steps": 1,
+      "reference": false,
+      "success_rate": 0.946,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    },
+    {
+      "checkpoint_id": "P-seed93",
+      "group": "P",
+      "num_steps": 10,
+      "reference": false,
+      "success_rate": 0.9169999999999999,
+      "suites": [
+        "libero_10",
+        "libero_goal",
+        "libero_object",
+        "libero_spatial"
+      ],
+      "training_seed": 93
+    }
+  ],
+  "source_report": {
+    "path": "results/study-v0.1.0.json",
+    "sha256": "9590dc5a4b8babd1d20957c3d96c97eff01c53ecd2b5d6d1576ffb811e0d641f"
+  },
+  "suite_success": [
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 97
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.806,
+      "successes": 403,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 27
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.946,
+      "successes": 473,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 14
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.972,
+      "successes": 486,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 21
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.958,
+      "successes": 479,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 105
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.79,
+      "successes": 395,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 38
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.924,
+      "successes": 462,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 15
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.97,
+      "successes": 485,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 20
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.96,
+      "successes": 480,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 100
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.8,
+      "successes": 400,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 27
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.946,
+      "successes": 473,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 5
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.99,
+      "successes": 495,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 9
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.982,
+      "successes": 491,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 127
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.746,
+      "successes": 373,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 32
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.936,
+      "successes": 468,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 20
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.96,
+      "successes": 480,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 28
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.944,
+      "successes": 472,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 92
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.816,
+      "successes": 408,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 38
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.924,
+      "successes": 462,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 8
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.984,
+      "successes": 492,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 15
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.97,
+      "successes": 485,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 101
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.798,
+      "successes": 399,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 37
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.926,
+      "successes": 463,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 16
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.968,
+      "successes": 484,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B0-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 26
+      },
+      "group": "B0",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.948,
+      "successes": 474,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 83
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.834,
+      "successes": 417,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 19
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.962,
+      "successes": 481,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 6
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.988,
+      "successes": 494,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 13
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.974,
+      "successes": 487,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 100
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.8,
+      "successes": 400,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 18
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.964,
+      "successes": 482,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 12
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.976,
+      "successes": 488,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 29
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.942,
+      "successes": 471,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 97
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.806,
+      "successes": 403,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 28
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.944,
+      "successes": 472,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 1
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.998,
+      "successes": 499,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 18
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.964,
+      "successes": 482,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 117
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.766,
+      "successes": 383,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 26
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.948,
+      "successes": 474,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 17
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.966,
+      "successes": 483,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 31
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.938,
+      "successes": 469,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 92
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.816,
+      "successes": 408,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 24
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.952,
+      "successes": 476,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 3
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.994,
+      "successes": 497,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 22
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.956,
+      "successes": 478,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 103
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.794,
+      "successes": 397,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 36
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.928,
+      "successes": 464,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 18
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.964,
+      "successes": 482,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "B1-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 28
+      },
+      "group": "B1",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.944,
+      "successes": 472,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 93
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.814,
+      "successes": 407,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 17
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.966,
+      "successes": 483,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 7
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.986,
+      "successes": 493,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 22
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.956,
+      "successes": 478,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 92
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.816,
+      "successes": 408,
+      "suite": "libero_10",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 44
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.912,
+      "successes": 456,
+      "suite": "libero_goal",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 15
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.97,
+      "successes": 485,
+      "suite": "libero_object",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed17",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 27
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.946,
+      "successes": 473,
+      "suite": "libero_spatial",
+      "training_seed": 17
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 100
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.8,
+      "successes": 400,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 19
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.962,
+      "successes": 481,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 5
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.99,
+      "successes": 495,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 11
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.978,
+      "successes": 489,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 97
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.806,
+      "successes": 403,
+      "suite": "libero_10",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 31
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.938,
+      "successes": 469,
+      "suite": "libero_goal",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 18
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.964,
+      "successes": 482,
+      "suite": "libero_object",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed42",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 27
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.946,
+      "successes": 473,
+      "suite": "libero_spatial",
+      "training_seed": 42
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 67
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.866,
+      "successes": 433,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 16
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.968,
+      "successes": 484,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 2
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.996,
+      "successes": 498,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 23
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.954,
+      "successes": 477,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 92
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.816,
+      "successes": 408,
+      "suite": "libero_10",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 25
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.95,
+      "successes": 475,
+      "suite": "libero_goal",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 18
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.964,
+      "successes": 482,
+      "suite": "libero_object",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "P-seed93",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 31
+      },
+      "group": "P",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.938,
+      "successes": 469,
+      "suite": "libero_spatial",
+      "training_seed": 93
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 39
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.922,
+      "successes": 461,
+      "suite": "libero_10",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 16
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.968,
+      "successes": 484,
+      "suite": "libero_goal",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 9
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.982,
+      "successes": 491,
+      "suite": "libero_object",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 4
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 1,
+      "success_rate": 0.992,
+      "successes": 496,
+      "suite": "libero_spatial",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 48
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.904,
+      "successes": 452,
+      "suite": "libero_10",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 14
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.972,
+      "successes": 486,
+      "suite": "libero_goal",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 11
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.978,
+      "successes": 489,
+      "suite": "libero_object",
+      "training_seed": null
+    },
+    {
+      "artifact_errors": {},
+      "checkpoint_id": "released-pi05-libero",
+      "episodes": 500,
+      "failure_tags": {
+        "timeout": 10
+      },
+      "group": "reference",
+      "latency_ms": {},
+      "num_steps": 10,
+      "success_rate": 0.98,
+      "successes": 490,
+      "suite": "libero_spatial",
+      "training_seed": null
+    }
+  ],
+  "task_comparisons": [
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        -2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9866666666666667,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          0.96,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        -4.0000000000000036
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -2.0000000000000018,
+      "description": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9933333333333333,
+        "B1": 0.9933333333333333,
+        "P": 0.98
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          0.98,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -6.000000000000005,
+        12.0,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": -8.000000000000007,
+      "description": "pick up the black bowl next to the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.88,
+        "B1": 0.9066666666666666,
+        "P": 0.9199999999999999
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.84,
+          0.96,
+          0.84
+        ],
+        "B1": [
+          0.9,
+          0.86,
+          0.96
+        ],
+        "P": [
+          0.84,
+          0.98,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -12.0,
+        -1.9999999999999907,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -5.333333333333334,
+      "P_minus_reference_pp": -9.999999999999998,
+      "description": "pick up the black bowl next to the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9533333333333334,
+        "B1": 0.9333333333333333,
+        "P": 0.88
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          0.94,
+          0.92
+        ],
+        "B1": [
+          0.94,
+          0.94,
+          0.92
+        ],
+        "P": [
+          0.82,
+          0.92,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -0.666666666666671,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the black bowl from table center and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9933333333333333,
+        "B1": 1.0,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          0.98
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        -2.0000000000000018,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the black bowl from table center and place it on the plate",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9933333333333333,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.98
+        ],
+        "P": [
+          1.0,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -5.999999999999995,
+        -6.000000000000005,
+        0.0
+      ],
+      "P_minus_B1_pp": -3.9999999999999925,
+      "P_minus_reference_pp": -6.666666666666665,
+      "description": "pick up the black bowl on the cookie box and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9533333333333333,
+        "B1": 0.9733333333333333,
+        "P": 0.9333333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.94,
+          0.96
+        ],
+        "B1": [
+          0.98,
+          1.0,
+          0.94
+        ],
+        "P": [
+          0.92,
+          0.94,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -8.000000000000007,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": -2.6666666666666727,
+      "P_minus_reference_pp": -7.333333333333336,
+      "description": "pick up the black bowl on the cookie box and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9933333333333333,
+        "B1": 0.9533333333333334,
+        "P": 0.9266666666666666
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.92,
+          0.96,
+          0.98
+        ],
+        "P": [
+          0.84,
+          0.96,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        0.0,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 3.3333333333333326,
+      "description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9933333333333333,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.98
+        ],
+        "P": [
+          0.98,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        0.0,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 2.0000000000000018,
+      "description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9199999999999999,
+        "B1": 0.96,
+        "P": 0.96
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.94,
+          0.88
+        ],
+        "B1": [
+          0.96,
+          0.96,
+          0.96
+        ],
+        "P": [
+          0.94,
+          0.96,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -7.9999999999999964,
+        -2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": -3.3333333333333326,
+      "P_minus_reference_pp": -6.000000000000005,
+      "description": "pick up the black bowl on the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9333333333333333,
+        "B1": 0.9533333333333333,
+        "P": 0.9199999999999999
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          0.96,
+          0.94
+        ],
+        "B1": [
+          0.96,
+          0.96,
+          0.94
+        ],
+        "P": [
+          0.88,
+          0.94,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        15.999999999999993,
+        2.0000000000000018,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 6.666666666666665,
+      "P_minus_reference_pp": -4.666666666666663,
+      "description": "pick up the black bowl on the ramekin and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.8266666666666667,
+        "B1": 0.8266666666666667,
+        "P": 0.8933333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.84,
+          0.82,
+          0.82
+        ],
+        "B1": [
+          0.78,
+          0.86,
+          0.84
+        ],
+        "P": [
+          0.94,
+          0.88,
+          0.86
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -0.666666666666671,
+      "P_minus_reference_pp": -2.0000000000000018,
+      "description": "pick up the black bowl next to the cookie box and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 0.9866666666666667,
+        "P": 0.98
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.96
+        ],
+        "P": [
+          1.0,
+          1.0,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        4.0000000000000036,
+        7.9999999999999964,
+        -5.999999999999995
+      ],
+      "P_minus_B1_pp": 2.0000000000000018,
+      "P_minus_reference_pp": -4.666666666666663,
+      "description": "pick up the black bowl next to the cookie box and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 0.9333333333333333,
+        "P": 0.9533333333333334
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "B1": [
+          0.96,
+          0.88,
+          0.96
+        ],
+        "P": [
+          1.0,
+          0.96,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        3.9999999999999925,
+        -5.999999999999995
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": -4.0000000000000036,
+      "description": "pick up the black bowl on the stove and place it on the plate",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.94,
+        "P": 0.94
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.96,
+          0.92,
+          0.94
+        ],
+        "P": [
+          0.98,
+          0.96,
+          0.88
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -6.000000000000005,
+        2.0000000000000018,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -2.0000000000000018,
+      "P_minus_reference_pp": -6.666666666666665,
+      "description": "pick up the black bowl on the stove and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9533333333333334,
+        "P": 0.9333333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.96,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          0.94,
+          0.92
+        ],
+        "P": [
+          0.94,
+          0.96,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        6.000000000000005,
+        7.9999999999999964
+      ],
+      "P_minus_B1_pp": 4.666666666666675,
+      "P_minus_reference_pp": -3.3333333333333326,
+      "description": "pick up the black bowl next to the plate and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9733333333333333,
+        "B1": 0.9199999999999999,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.96,
+          0.98
+        ],
+        "B1": [
+          0.96,
+          0.94,
+          0.86
+        ],
+        "P": [
+          0.96,
+          1.0,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        9.999999999999998,
+        0.0,
+        1.9999999999999907
+      ],
+      "P_minus_B1_pp": 3.9999999999999925,
+      "P_minus_reference_pp": -6.000000000000005,
+      "description": "pick up the black bowl next to the plate and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.92,
+        "B1": 0.9,
+        "P": 0.94
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.88,
+          0.92
+        ],
+        "B1": [
+          0.88,
+          0.9,
+          0.92
+        ],
+        "P": [
+          0.98,
+          0.9,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.6666666666666599,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the black bowl on the wooden cabinet and place it on the plate",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9866666666666667,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          0.98
+        ],
+        "P": [
+          1.0,
+          1.0,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.6666666666666599,
+      "P_minus_reference_pp": 3.3333333333333326,
+      "description": "pick up the black bowl on the wooden cabinet and place it on the plate",
+      "mean_success_rates": {
+        "B0": 0.9333333333333333,
+        "B1": 0.9666666666666667,
+        "P": 0.9733333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.92,
+          0.94
+        ],
+        "B1": [
+          0.98,
+          0.96,
+          0.96
+        ],
+        "P": [
+          1.0,
+          0.96,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_spatial",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": 7.9999999999999964,
+      "description": "pick up the alphabet soup and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 0.9866666666666667,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.92,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.96
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        -5.999999999999995,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -5.333333333333334,
+      "description": "pick up the alphabet soup and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9533333333333333,
+        "B1": 0.96,
+        "P": 0.9466666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.94,
+          0.96
+        ],
+        "B1": [
+          0.96,
+          0.98,
+          0.94
+        ],
+        "P": [
+          0.94,
+          0.92,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -7.9999999999999964,
+        0.0,
+        -4.0000000000000036
+      ],
+      "P_minus_B1_pp": -3.9999999999999925,
+      "P_minus_reference_pp": -2.6666666666666616,
+      "description": "pick up the cream cheese and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.94,
+        "B1": 0.9933333333333333,
+        "P": 0.9533333333333334
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          0.96,
+          0.96
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          1.0
+        ],
+        "P": [
+          0.92,
+          0.98,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        2.0000000000000018,
+        -9.999999999999998
+      ],
+      "P_minus_B1_pp": -2.6666666666666616,
+      "P_minus_reference_pp": -6.666666666666665,
+      "description": "pick up the cream cheese and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9666666666666667,
+        "B1": 0.96,
+        "P": 0.9333333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.98,
+          0.98
+        ],
+        "B1": [
+          0.96,
+          0.94,
+          0.98
+        ],
+        "P": [
+          0.96,
+          0.96,
+          0.88
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 0.0,
+      "description": "pick up the salad dressing and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 1.0,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        2.0000000000000018,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": 0.6666666666666599,
+      "P_minus_reference_pp": 5.333333333333334,
+      "description": "pick up the salad dressing and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9866666666666667,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.98,
+          0.98
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -4.0000000000000036,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "pick up the bbq sauce and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 1.0,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          0.96,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        -4.0000000000000036,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -2.6666666666666616,
+      "P_minus_reference_pp": 2.6666666666666727,
+      "description": "pick up the bbq sauce and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9933333333333333,
+        "B1": 0.9933333333333333,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          0.98
+        ],
+        "B1": [
+          0.98,
+          1.0,
+          1.0
+        ],
+        "P": [
+          0.96,
+          0.96,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        4.0000000000000036,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": 4.0000000000000036,
+      "description": "pick up the ketchup and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9866666666666667,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.96,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": -0.6666666666666599,
+      "P_minus_reference_pp": 0.666666666666671,
+      "description": "pick up the ketchup and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9933333333333333,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.98
+        ],
+        "P": [
+          0.98,
+          1.0,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        6.000000000000005,
+        -2.0000000000000018,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 2.0000000000000018,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the tomato sauce and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.94,
+        "B1": 0.9733333333333333,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.88,
+          1.0,
+          0.94
+        ],
+        "B1": [
+          0.94,
+          1.0,
+          0.98
+        ],
+        "P": [
+          1.0,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -4.0000000000000036,
+        0.0,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": -0.666666666666671,
+      "P_minus_reference_pp": -2.6666666666666616,
+      "description": "pick up the tomato sauce and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.88,
+        "B1": 0.92,
+        "P": 0.9133333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          0.82,
+          0.92
+        ],
+        "B1": [
+          0.98,
+          0.9,
+          0.88
+        ],
+        "P": [
+          0.94,
+          0.9,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": -0.666666666666671,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the butter and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 1.0,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          0.96,
+          0.98
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          0.98,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        -2.0000000000000018,
+        6.000000000000005
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": -0.666666666666671,
+      "description": "pick up the butter and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.98,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.94
+        ],
+        "P": [
+          1.0,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        -4.0000000000000036,
+        0.0
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "pick up the milk and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 1.0,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          0.96
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          0.96,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        -2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "pick up the milk and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 1.0,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.98,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          0.98,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 2.0000000000000018,
+      "description": "pick up the chocolate pudding and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 1.0,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.666666666666671,
+      "P_minus_reference_pp": 0.0,
+      "description": "pick up the chocolate pudding and place it in the basket",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9933333333333333,
+        "P": 1.0
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        -2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 1.3333333333333308,
+      "description": "pick up the orange juice and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 0.9933333333333333,
+        "P": 0.9933333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "B1": [
+          0.98,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        3.9999999999999925,
+        5.999999999999995,
+        1.9999999999999907
+      ],
+      "P_minus_B1_pp": 3.9999999999999925,
+      "P_minus_reference_pp": -4.0000000000000036,
+      "description": "pick up the orange juice and place it in the basket",
+      "mean_success_rates": {
+        "B0": 0.9066666666666666,
+        "B1": 0.9,
+        "P": 0.94
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.9,
+          0.86
+        ],
+        "B1": [
+          0.9,
+          0.88,
+          0.92
+        ],
+        "P": [
+          0.94,
+          0.94,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_object",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        2.0000000000000018,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 2.0000000000000018,
+      "P_minus_reference_pp": 4.666666666666675,
+      "description": "open the middle drawer of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.9533333333333334,
+        "B1": 0.9666666666666667,
+        "P": 0.9866666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          1.0,
+          0.96
+        ],
+        "B1": [
+          0.98,
+          0.94,
+          0.98
+        ],
+        "P": [
+          1.0,
+          0.96,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -4.0000000000000036,
+        -4.0000000000000036,
+        7.9999999999999964
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 0.0,
+      "description": "open the middle drawer of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.9466666666666667,
+        "B1": 0.96,
+        "P": 0.96
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.92,
+          0.98,
+          0.94
+        ],
+        "B1": [
+          0.98,
+          1.0,
+          0.9
+        ],
+        "P": [
+          0.94,
+          0.96,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": -2.0000000000000018,
+      "description": "put the bowl on the stove",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9666666666666667,
+        "P": 0.98
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.96,
+          0.98,
+          0.96
+        ],
+        "P": [
+          0.96,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -7.9999999999999964,
+        0.0,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -4.0000000000000036,
+      "description": "put the bowl on the stove",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9733333333333333,
+        "P": 0.96
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          1.0,
+          0.96
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          0.96
+        ],
+        "P": [
+          0.9,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        0.0,
+        -4.0000000000000036
+      ],
+      "P_minus_B1_pp": -0.666666666666671,
+      "P_minus_reference_pp": 0.0,
+      "description": "put the wine bottle on top of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9866666666666667,
+        "P": 0.98
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.98,
+          0.98
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          0.98,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        -5.999999999999995
+      ],
+      "P_minus_B1_pp": -2.0000000000000018,
+      "P_minus_reference_pp": -3.3333333333333326,
+      "description": "put the wine bottle on top of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.98,
+        "B1": 0.9866666666666667,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.98,
+          0.96,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          0.98
+        ],
+        "P": [
+          1.0,
+          0.98,
+          0.92
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        1.9999999999999907,
+        4.0000000000000036,
+        7.9999999999999964
+      ],
+      "P_minus_B1_pp": 4.666666666666663,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "open the top drawer and put the bowl inside",
+      "mean_success_rates": {
+        "B0": 0.8666666666666667,
+        "B1": 0.88,
+        "P": 0.9266666666666666
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.8,
+          0.92,
+          0.88
+        ],
+        "B1": [
+          0.92,
+          0.86,
+          0.86
+        ],
+        "P": [
+          0.94,
+          0.9,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -18.000000000000004,
+        -5.999999999999995,
+        20.000000000000007
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -13.99999999999999,
+      "description": "open the top drawer and put the bowl inside",
+      "mean_success_rates": {
+        "B0": 0.7733333333333333,
+        "B1": 0.8133333333333334,
+        "P": 0.8
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.74,
+          0.78,
+          0.8
+        ],
+        "B1": [
+          0.9,
+          0.82,
+          0.72
+        ],
+        "P": [
+          0.72,
+          0.76,
+          0.92
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        6.000000000000005,
+        -5.999999999999995,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 0.666666666666671,
+      "P_minus_reference_pp": 0.0,
+      "description": "put the bowl on top of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.9733333333333333,
+        "B1": 0.9533333333333333,
+        "P": 0.96
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          1.0,
+          0.96
+        ],
+        "B1": [
+          0.94,
+          0.98,
+          0.94
+        ],
+        "P": [
+          1.0,
+          0.92,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 0.0,
+      "description": "put the bowl on top of the cabinet",
+      "mean_success_rates": {
+        "B0": 0.9666666666666667,
+        "B1": 0.98,
+        "P": 0.98
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.96,
+          0.98
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          0.98
+        ],
+        "P": [
+          0.98,
+          0.98,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -4.0000000000000036,
+        -5.999999999999995,
+        -3.9999999999999925
+      ],
+      "P_minus_B1_pp": -4.666666666666663,
+      "P_minus_reference_pp": -3.3333333333333215,
+      "description": "push the plate to the front of the stove",
+      "mean_success_rates": {
+        "B0": 0.82,
+        "B1": 0.9533333333333334,
+        "P": 0.9066666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.88,
+          0.82,
+          0.76
+        ],
+        "B1": [
+          0.92,
+          0.98,
+          0.96
+        ],
+        "P": [
+          0.88,
+          0.92,
+          0.92
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        -7.9999999999999964,
+        0.0
+      ],
+      "P_minus_B1_pp": -1.9999999999999907,
+      "P_minus_reference_pp": -1.9999999999999907,
+      "description": "push the plate to the front of the stove",
+      "mean_success_rates": {
+        "B0": 0.8733333333333333,
+        "B1": 0.94,
+        "P": 0.92
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.84,
+          0.92,
+          0.86
+        ],
+        "B1": [
+          0.88,
+          1.0,
+          0.94
+        ],
+        "P": [
+          0.9,
+          0.92,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        2.0000000000000018,
+        2.0000000000000018
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": 4.0000000000000036,
+      "description": "put the cream cheese in the bowl",
+      "mean_success_rates": {
+        "B0": 0.9533333333333334,
+        "B1": 0.9866666666666667,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          0.94,
+          0.92
+        ],
+        "B1": [
+          1.0,
+          0.98,
+          0.98
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -5.999999999999995,
+        3.9999999999999925,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -1.3333333333333308,
+      "P_minus_reference_pp": -3.3333333333333326,
+      "description": "put the cream cheese in the bowl",
+      "mean_success_rates": {
+        "B0": 0.96,
+        "B1": 0.96,
+        "P": 0.9466666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.96,
+          0.98,
+          0.94
+        ],
+        "B1": [
+          0.98,
+          0.92,
+          0.98
+        ],
+        "P": [
+          0.92,
+          0.96,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 0.0,
+      "description": "turn on the stove",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 1.0,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "P_minus_B1_pp": 0.0,
+      "P_minus_reference_pp": 0.0,
+      "description": "turn on the stove",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 1.0,
+        "P": 1.0
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        2.0000000000000018,
+        2.0000000000000018,
+        0.0
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": 2.0000000000000018,
+      "description": "put the bowl on the plate",
+      "mean_success_rates": {
+        "B0": 1.0,
+        "B1": 0.9866666666666667,
+        "P": 1.0
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "B1": [
+          0.98,
+          0.98,
+          1.0
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        0.0,
+        0.0,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": 1.3333333333333308,
+      "P_minus_reference_pp": 0.0,
+      "description": "put the bowl on the plate",
+      "mean_success_rates": {
+        "B0": 0.9866666666666667,
+        "B1": 0.9866666666666667,
+        "P": 1.0
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          0.96,
+          1.0
+        ],
+        "B1": [
+          1.0,
+          1.0,
+          0.96
+        ],
+        "P": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -5.999999999999995,
+        19.999999999999996,
+        6.000000000000005
+      ],
+      "P_minus_B1_pp": 6.666666666666665,
+      "P_minus_reference_pp": -6.666666666666665,
+      "description": "put the wine bottle on the rack",
+      "mean_success_rates": {
+        "B0": 0.84,
+        "B1": 0.8466666666666667,
+        "P": 0.9133333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.8,
+          0.78
+        ],
+        "B1": [
+          0.94,
+          0.76,
+          0.84
+        ],
+        "P": [
+          0.88,
+          0.96,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -17.999999999999993,
+        3.9999999999999925,
+        -5.999999999999995
+      ],
+      "P_minus_B1_pp": -6.666666666666665,
+      "P_minus_reference_pp": -12.0,
+      "description": "put the wine bottle on the rack",
+      "mean_success_rates": {
+        "B0": 0.82,
+        "B1": 0.8666666666666667,
+        "P": 0.8
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.92,
+      "seed_success_rates": {
+        "B0": [
+          0.86,
+          0.82,
+          0.78
+        ],
+        "B1": [
+          0.94,
+          0.8,
+          0.86
+        ],
+        "P": [
+          0.76,
+          0.84,
+          0.8
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_goal",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        7.9999999999999964,
+        2.0000000000000018,
+        6.000000000000005
+      ],
+      "P_minus_B1_pp": 5.333333333333334,
+      "P_minus_reference_pp": -19.333333333333325,
+      "description": "put both the alphabet soup and the tomato sauce in the basket",
+      "mean_success_rates": {
+        "B0": 0.7933333333333333,
+        "B1": 0.7133333333333334,
+        "P": 0.7666666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.78,
+          0.78,
+          0.82
+        ],
+        "B1": [
+          0.68,
+          0.72,
+          0.74
+        ],
+        "P": [
+          0.76,
+          0.74,
+          0.8
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -6.000000000000005,
+        26.0,
+        20.000000000000007
+      ],
+      "P_minus_B1_pp": 13.33333333333333,
+      "P_minus_reference_pp": -17.999999999999993,
+      "description": "put both the alphabet soup and the tomato sauce in the basket",
+      "mean_success_rates": {
+        "B0": 0.7933333333333333,
+        "B1": 0.6266666666666667,
+        "P": 0.76
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.76,
+          0.78,
+          0.84
+        ],
+        "B1": [
+          0.76,
+          0.54,
+          0.58
+        ],
+        "P": [
+          0.7,
+          0.8,
+          0.78
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 0
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -3.9999999999999925,
+        -15.999999999999993,
+        -5.999999999999995
+      ],
+      "P_minus_B1_pp": -8.666666666666655,
+      "P_minus_reference_pp": -12.666666666666659,
+      "description": "put both the cream cheese box and the butter in the basket",
+      "mean_success_rates": {
+        "B0": 0.8933333333333333,
+        "B1": 0.94,
+        "P": 0.8533333333333334
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.88,
+          0.86
+        ],
+        "B1": [
+          0.94,
+          0.94,
+          0.94
+        ],
+        "P": [
+          0.9,
+          0.78,
+          0.88
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -12.0,
+        -8.000000000000007,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": -7.333333333333336,
+      "P_minus_reference_pp": -16.000000000000004,
+      "description": "put both the cream cheese box and the butter in the basket",
+      "mean_success_rates": {
+        "B0": 0.8666666666666667,
+        "B1": 0.9133333333333333,
+        "P": 0.84
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          0.82,
+          0.88
+        ],
+        "B1": [
+          0.94,
+          0.92,
+          0.88
+        ],
+        "P": [
+          0.82,
+          0.84,
+          0.86
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 1
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        7.9999999999999964,
+        7.9999999999999964,
+        14.000000000000002
+      ],
+      "P_minus_B1_pp": 9.999999999999998,
+      "P_minus_reference_pp": -1.3333333333333308,
+      "description": "turn on the stove and put the moka pot on it",
+      "mean_success_rates": {
+        "B0": 0.8866666666666667,
+        "B1": 0.8666666666666667,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          0.9,
+          0.88,
+          0.88
+        ],
+        "B1": [
+          0.9,
+          0.86,
+          0.84
+        ],
+        "P": [
+          0.98,
+          0.94,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        16.000000000000004,
+        12.0,
+        -2.0000000000000018
+      ],
+      "P_minus_B1_pp": 8.666666666666668,
+      "P_minus_reference_pp": 0.666666666666671,
+      "description": "turn on the stove and put the moka pot on it",
+      "mean_success_rates": {
+        "B0": 0.8733333333333333,
+        "B1": 0.88,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.88,
+          0.82,
+          0.92
+        ],
+        "B1": [
+          0.82,
+          0.86,
+          0.96
+        ],
+        "P": [
+          0.98,
+          0.98,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 2
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        12.0,
+        16.000000000000004,
+        21.999999999999996
+      ],
+      "P_minus_B1_pp": 16.666666666666664,
+      "P_minus_reference_pp": -5.333333333333334,
+      "description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "mean_success_rates": {
+        "B0": 0.96,
+        "B1": 0.76,
+        "P": 0.9266666666666666
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.98,
+      "seed_success_rates": {
+        "B0": [
+          1.0,
+          0.98,
+          0.9
+        ],
+        "B1": [
+          0.76,
+          0.76,
+          0.76
+        ],
+        "P": [
+          0.88,
+          0.92,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        7.9999999999999964,
+        4.0000000000000036,
+        0.0
+      ],
+      "P_minus_B1_pp": 3.9999999999999925,
+      "P_minus_reference_pp": -2.0000000000000018,
+      "description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "mean_success_rates": {
+        "B0": 0.9466666666666667,
+        "B1": 0.88,
+        "P": 0.9199999999999999
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.92,
+          0.94,
+          0.98
+        ],
+        "B1": [
+          0.86,
+          0.84,
+          0.94
+        ],
+        "P": [
+          0.94,
+          0.88,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 3
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -20.000000000000007,
+        4.0000000000000036,
+        1.9999999999999907
+      ],
+      "P_minus_B1_pp": -4.666666666666675,
+      "P_minus_reference_pp": -10.666666666666668,
+      "description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "mean_success_rates": {
+        "B0": 0.8533333333333333,
+        "B1": 0.9,
+        "P": 0.8533333333333333
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.84,
+          0.9,
+          0.82
+        ],
+        "B1": [
+          0.92,
+          0.86,
+          0.92
+        ],
+        "P": [
+          0.72,
+          0.9,
+          0.94
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -9.999999999999998,
+        -5.999999999999995,
+        -12.0
+      ],
+      "P_minus_B1_pp": -9.333333333333327,
+      "P_minus_reference_pp": -36.0,
+      "description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "mean_success_rates": {
+        "B0": 0.6266666666666666,
+        "B1": 0.7333333333333333,
+        "P": 0.64
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.7,
+          0.6,
+          0.58
+        ],
+        "B1": [
+          0.7,
+          0.7,
+          0.8
+        ],
+        "P": [
+          0.6,
+          0.64,
+          0.68
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 4
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        7.9999999999999964,
+        3.9999999999999925,
+        3.9999999999999925
+      ],
+      "P_minus_B1_pp": 5.333333333333334,
+      "P_minus_reference_pp": 0.666666666666671,
+      "description": "pick up the book and place it in the back compartment of the caddy",
+      "mean_success_rates": {
+        "B0": 0.88,
+        "B1": 0.9133333333333333,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.82,
+          0.86,
+          0.96
+        ],
+        "B1": [
+          0.9,
+          0.92,
+          0.92
+        ],
+        "P": [
+          0.98,
+          0.96,
+          0.96
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -2.0000000000000018,
+        5.999999999999995,
+        5.999999999999995
+      ],
+      "P_minus_B1_pp": 3.3333333333333215,
+      "P_minus_reference_pp": -2.0000000000000018,
+      "description": "pick up the book and place it in the back compartment of the caddy",
+      "mean_success_rates": {
+        "B0": 0.8200000000000001,
+        "B1": 0.9066666666666667,
+        "P": 0.94
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.8,
+          0.78,
+          0.88
+        ],
+        "B1": [
+          0.88,
+          0.92,
+          0.92
+        ],
+        "P": [
+          0.86,
+          0.98,
+          0.98
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 5
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -6.000000000000005,
+        -19.999999999999996,
+        4.0000000000000036
+      ],
+      "P_minus_B1_pp": -7.333333333333336,
+      "P_minus_reference_pp": -8.000000000000007,
+      "description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "mean_success_rates": {
+        "B0": 0.8533333333333333,
+        "B1": 0.9133333333333333,
+        "P": 0.84
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.92,
+      "seed_success_rates": {
+        "B0": [
+          0.84,
+          0.88,
+          0.84
+        ],
+        "B1": [
+          0.92,
+          0.94,
+          0.88
+        ],
+        "P": [
+          0.86,
+          0.74,
+          0.92
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        4.0000000000000036,
+        -21.999999999999996,
+        0.0
+      ],
+      "P_minus_B1_pp": -5.999999999999995,
+      "P_minus_reference_pp": -8.666666666666668,
+      "description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "mean_success_rates": {
+        "B0": 0.8466666666666667,
+        "B1": 0.8933333333333333,
+        "P": 0.8333333333333334
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.92,
+      "seed_success_rates": {
+        "B0": [
+          0.88,
+          0.86,
+          0.8
+        ],
+        "B1": [
+          0.88,
+          0.9,
+          0.9
+        ],
+        "P": [
+          0.92,
+          0.68,
+          0.9
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 6
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -5.999999999999995,
+        9.999999999999998,
+        14.000000000000002
+      ],
+      "P_minus_B1_pp": 6.000000000000005,
+      "P_minus_reference_pp": 2.6666666666666727,
+      "description": "put both the alphabet soup and the cream cheese box in the basket",
+      "mean_success_rates": {
+        "B0": 0.9466666666666667,
+        "B1": 0.9066666666666666,
+        "P": 0.9666666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.94,
+          0.96,
+          0.94
+        ],
+        "B1": [
+          0.98,
+          0.88,
+          0.86
+        ],
+        "P": [
+          0.92,
+          0.98,
+          1.0
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        8.000000000000007,
+        -2.0000000000000018,
+        1.9999999999999907
+      ],
+      "P_minus_B1_pp": 2.6666666666666616,
+      "P_minus_reference_pp": -14.000000000000002,
+      "description": "put both the alphabet soup and the cream cheese box in the basket",
+      "mean_success_rates": {
+        "B0": 0.8866666666666667,
+        "B1": 0.8333333333333334,
+        "P": 0.86
+      },
+      "num_steps": 10,
+      "released_success_rate": 1.0,
+      "seed_success_rates": {
+        "B0": [
+          0.86,
+          0.9,
+          0.9
+        ],
+        "B1": [
+          0.84,
+          0.86,
+          0.8
+        ],
+        "P": [
+          0.92,
+          0.84,
+          0.82
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 7
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -12.0,
+        16.000000000000004,
+        -6.0
+      ],
+      "P_minus_B1_pp": -0.6666666666666654,
+      "P_minus_reference_pp": -19.999999999999996,
+      "description": "put both moka pots on the stove",
+      "mean_success_rates": {
+        "B0": 0.19999999999999998,
+        "B1": 0.38666666666666666,
+        "P": 0.38
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.58,
+      "seed_success_rates": {
+        "B0": [
+          0.18,
+          0.12,
+          0.3
+        ],
+        "B1": [
+          0.48,
+          0.24,
+          0.44
+        ],
+        "P": [
+          0.36,
+          0.4,
+          0.38
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        19.999999999999996,
+        31.999999999999996,
+        1.9999999999999962
+      ],
+      "P_minus_B1_pp": 18.0,
+      "P_minus_reference_pp": 15.333333333333332,
+      "description": "put both moka pots on the stove",
+      "mean_success_rates": {
+        "B0": 0.35333333333333333,
+        "B1": 0.35333333333333333,
+        "P": 0.5333333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.38,
+      "seed_success_rates": {
+        "B0": [
+          0.38,
+          0.3,
+          0.38
+        ],
+        "B1": [
+          0.4,
+          0.26,
+          0.4
+        ],
+        "P": [
+          0.6,
+          0.58,
+          0.42
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 8
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -7.9999999999999964,
+        -29.999999999999993,
+        -4.0000000000000036
+      ],
+      "P_minus_B1_pp": -13.99999999999999,
+      "P_minus_reference_pp": -21.333333333333325,
+      "description": "put the yellow and white mug in the microwave and close it",
+      "mean_success_rates": {
+        "B0": 0.8066666666666666,
+        "B1": 0.8866666666666666,
+        "P": 0.7466666666666667
+      },
+      "num_steps": 1,
+      "released_success_rate": 0.96,
+      "seed_success_rates": {
+        "B0": [
+          0.82,
+          0.76,
+          0.84
+        ],
+        "B1": [
+          0.86,
+          0.94,
+          0.86
+        ],
+        "P": [
+          0.78,
+          0.64,
+          0.82
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 9
+    },
+    {
+      "P_minus_B1_by_seed_pp": [
+        -10.000000000000009,
+        -2.0000000000000018,
+        7.9999999999999964
+      ],
+      "P_minus_B1_pp": -1.333333333333342,
+      "P_minus_reference_pp": -10.666666666666668,
+      "description": "put the yellow and white mug in the microwave and close it",
+      "mean_success_rates": {
+        "B0": 0.7666666666666666,
+        "B1": 0.8466666666666667,
+        "P": 0.8333333333333333
+      },
+      "num_steps": 10,
+      "released_success_rate": 0.94,
+      "seed_success_rates": {
+        "B0": [
+          0.82,
+          0.66,
+          0.82
+        ],
+        "B1": [
+          0.92,
+          0.86,
+          0.76
+        ],
+        "P": [
+          0.82,
+          0.84,
+          0.84
+        ]
+      },
+      "seeds": [
+        17,
+        42,
+        93
+      ],
+      "suite": "libero_10",
+      "task_id": 9
+    }
+  ],
+  "task_count": 800,
+  "task_descriptions": [
+    {
+      "description": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "public_log": "task-logs/030.jsonl",
+      "public_log_sha256": "39ce80d503fb2cd5fa5486037694053b7c479b4de8c5100f374b876301b4c495",
+      "suite": "libero_spatial",
+      "task_id": 0
+    },
+    {
+      "description": "pick up the black bowl next to the ramekin and place it on the plate",
+      "public_log": "task-logs/031.jsonl",
+      "public_log_sha256": "fe3ce3268b04e1a6813b6948b6b0efd13910ced0f32034ff9058227a67366c87",
+      "suite": "libero_spatial",
+      "task_id": 1
+    },
+    {
+      "description": "pick up the black bowl from table center and place it on the plate",
+      "public_log": "task-logs/032.jsonl",
+      "public_log_sha256": "ad2d5338158c1b5f41699000540c70c8216a801b4a55ce21ef7430cbf6f2dbea",
+      "suite": "libero_spatial",
+      "task_id": 2
+    },
+    {
+      "description": "pick up the black bowl on the cookie box and place it on the plate",
+      "public_log": "task-logs/033.jsonl",
+      "public_log_sha256": "a3c78f9265dfce63b60596e41c4522316c74e991e54c341d9918e45a9f5cb653",
+      "suite": "libero_spatial",
+      "task_id": 3
+    },
+    {
+      "description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "public_log": "task-logs/034.jsonl",
+      "public_log_sha256": "cbbeb68d310dc6ab7e01b9d948e2d9dffe41e1790df0fc029a89eaab7df148d3",
+      "suite": "libero_spatial",
+      "task_id": 4
+    },
+    {
+      "description": "pick up the black bowl on the ramekin and place it on the plate",
+      "public_log": "task-logs/035.jsonl",
+      "public_log_sha256": "12baade79bc9e84d1cd1eef8f321f8ea1339a30570f12946a8615af40aa379a6",
+      "suite": "libero_spatial",
+      "task_id": 5
+    },
+    {
+      "description": "pick up the black bowl next to the cookie box and place it on the plate",
+      "public_log": "task-logs/036.jsonl",
+      "public_log_sha256": "9c065fed5c3cd01b41fe010e49263ddeef286b679b31907c514e6cd5822772c4",
+      "suite": "libero_spatial",
+      "task_id": 6
+    },
+    {
+      "description": "pick up the black bowl on the stove and place it on the plate",
+      "public_log": "task-logs/037.jsonl",
+      "public_log_sha256": "f3cd1abdf131bcd0ec6dae2f8a8a4395a7937e3eb16c55ae66fe7a9676fc5edc",
+      "suite": "libero_spatial",
+      "task_id": 7
+    },
+    {
+      "description": "pick up the black bowl next to the plate and place it on the plate",
+      "public_log": "task-logs/038.jsonl",
+      "public_log_sha256": "a7848aa5037daffc96abd671b226684d23fa5f9038b02c459ca69937755ff733",
+      "suite": "libero_spatial",
+      "task_id": 8
+    },
+    {
+      "description": "pick up the black bowl on the wooden cabinet and place it on the plate",
+      "public_log": "task-logs/039.jsonl",
+      "public_log_sha256": "a79072bf0de5909092342709a4348caadeaaf65cf60c6c3e364548b2d8e7363c",
+      "suite": "libero_spatial",
+      "task_id": 9
+    },
+    {
+      "description": "pick up the alphabet soup and place it in the basket",
+      "public_log": "task-logs/020.jsonl",
+      "public_log_sha256": "6e9846dcde0b7b59cdaace1823346987fa79f412ca954b1c5f34ffb7500e7773",
+      "suite": "libero_object",
+      "task_id": 0
+    },
+    {
+      "description": "pick up the cream cheese and place it in the basket",
+      "public_log": "task-logs/021.jsonl",
+      "public_log_sha256": "b93d4c9ac3d000156c59c9c3d159026681b688f028edccce740f96b79b770df7",
+      "suite": "libero_object",
+      "task_id": 1
+    },
+    {
+      "description": "pick up the salad dressing and place it in the basket",
+      "public_log": "task-logs/022.jsonl",
+      "public_log_sha256": "b92887d6f69585dd1573dc62ccc4d2f355868d418012742bc5e1ae2e3f151135",
+      "suite": "libero_object",
+      "task_id": 2
+    },
+    {
+      "description": "pick up the bbq sauce and place it in the basket",
+      "public_log": "task-logs/023.jsonl",
+      "public_log_sha256": "7e8bbdd1e00d4e61d93690fa51fdb4f96b662041f82e0a4e23809f5de31b0256",
+      "suite": "libero_object",
+      "task_id": 3
+    },
+    {
+      "description": "pick up the ketchup and place it in the basket",
+      "public_log": "task-logs/024.jsonl",
+      "public_log_sha256": "7555c1f50243f1bb6ea3597aceea1b046983acc3e9ef1369506141dbd2219592",
+      "suite": "libero_object",
+      "task_id": 4
+    },
+    {
+      "description": "pick up the tomato sauce and place it in the basket",
+      "public_log": "task-logs/025.jsonl",
+      "public_log_sha256": "339ca2150352e28e72bf0d98479c7cd88a6b4875d8e1606fd8308885e67b6ed8",
+      "suite": "libero_object",
+      "task_id": 5
+    },
+    {
+      "description": "pick up the butter and place it in the basket",
+      "public_log": "task-logs/026.jsonl",
+      "public_log_sha256": "5ccdbcb701ca9f6d47a25f9fd8148dc4398d6960a31a3b5979f7ef1590a9c237",
+      "suite": "libero_object",
+      "task_id": 6
+    },
+    {
+      "description": "pick up the milk and place it in the basket",
+      "public_log": "task-logs/027.jsonl",
+      "public_log_sha256": "342e85fd9520b69c0ff3e2f2c8c72a34d8062c8cf50b3cfa363fdc7783e417c6",
+      "suite": "libero_object",
+      "task_id": 7
+    },
+    {
+      "description": "pick up the chocolate pudding and place it in the basket",
+      "public_log": "task-logs/028.jsonl",
+      "public_log_sha256": "4e780acf87dfa7a6c09879b2d979c521651be0b16863d9e6fe83b16c816eb923",
+      "suite": "libero_object",
+      "task_id": 8
+    },
+    {
+      "description": "pick up the orange juice and place it in the basket",
+      "public_log": "task-logs/029.jsonl",
+      "public_log_sha256": "1f4e7016a5f652af7ec67820caca2e1c3ac35f08e017c12818ae29a151801467",
+      "suite": "libero_object",
+      "task_id": 9
+    },
+    {
+      "description": "open the middle drawer of the cabinet",
+      "public_log": "task-logs/010.jsonl",
+      "public_log_sha256": "dbfd318cda37c8d9af76fcb3591c4280a36893dbbbed17e66ce6b3cf704ec65b",
+      "suite": "libero_goal",
+      "task_id": 0
+    },
+    {
+      "description": "put the bowl on the stove",
+      "public_log": "task-logs/011.jsonl",
+      "public_log_sha256": "1908fba735a7ebd295abfb4b8384415fabf8742e886c0f8410b2fcb504664313",
+      "suite": "libero_goal",
+      "task_id": 1
+    },
+    {
+      "description": "put the wine bottle on top of the cabinet",
+      "public_log": "task-logs/012.jsonl",
+      "public_log_sha256": "4e9b47c7b09f8864d63e6771f4ae9ec317c905b0c83912c3501ce197603f168b",
+      "suite": "libero_goal",
+      "task_id": 2
+    },
+    {
+      "description": "open the top drawer and put the bowl inside",
+      "public_log": "task-logs/013.jsonl",
+      "public_log_sha256": "f50dd7407b6f55f188cde10e930381be603b6b2beedf63614823f17a5186c459",
+      "suite": "libero_goal",
+      "task_id": 3
+    },
+    {
+      "description": "put the bowl on top of the cabinet",
+      "public_log": "task-logs/014.jsonl",
+      "public_log_sha256": "576f9a8c0b1a0ee0ac11af6a5653e343c367a24a738da95788595d84055b9ec2",
+      "suite": "libero_goal",
+      "task_id": 4
+    },
+    {
+      "description": "push the plate to the front of the stove",
+      "public_log": "task-logs/015.jsonl",
+      "public_log_sha256": "f03b64ee766b46d3d966fdcd1e0cf6a9e64d38b1b7824e48196dfb2ce2071c33",
+      "suite": "libero_goal",
+      "task_id": 5
+    },
+    {
+      "description": "put the cream cheese in the bowl",
+      "public_log": "task-logs/016.jsonl",
+      "public_log_sha256": "c91826021f4a17524d81d620ed1350f0f835de12414e3f09cf3d79d32231920f",
+      "suite": "libero_goal",
+      "task_id": 6
+    },
+    {
+      "description": "turn on the stove",
+      "public_log": "task-logs/017.jsonl",
+      "public_log_sha256": "a061d89178dd0a078b5e56a62cc94672a3aed1c0fd2254b6ee3043d24d6292d6",
+      "suite": "libero_goal",
+      "task_id": 7
+    },
+    {
+      "description": "put the bowl on the plate",
+      "public_log": "task-logs/018.jsonl",
+      "public_log_sha256": "931617164725ceaa3a85163612d4919381e5525e1c0aac4c2d30da5535481ed5",
+      "suite": "libero_goal",
+      "task_id": 8
+    },
+    {
+      "description": "put the wine bottle on the rack",
+      "public_log": "task-logs/019.jsonl",
+      "public_log_sha256": "911c837edfc3c36765a5f32bc0752264d36f300fddc45776c7d32825d6257392",
+      "suite": "libero_goal",
+      "task_id": 9
+    },
+    {
+      "description": "put both the alphabet soup and the tomato sauce in the basket",
+      "public_log": "task-logs/000.jsonl",
+      "public_log_sha256": "4c59db199a3a0df7a0897e16518d5e816182edc53304caf54256de4ae2efdc27",
+      "suite": "libero_10",
+      "task_id": 0
+    },
+    {
+      "description": "put both the cream cheese box and the butter in the basket",
+      "public_log": "task-logs/001.jsonl",
+      "public_log_sha256": "ec4633a52364f6c1ccf02a07f86d1333c888fd0834fa050fec01949cf2d10173",
+      "suite": "libero_10",
+      "task_id": 1
+    },
+    {
+      "description": "turn on the stove and put the moka pot on it",
+      "public_log": "task-logs/002.jsonl",
+      "public_log_sha256": "3562fc77231fa3efddf16ef8850328c18734a0b24a4ac9f16c6c7622689235fd",
+      "suite": "libero_10",
+      "task_id": 2
+    },
+    {
+      "description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "public_log": "task-logs/003.jsonl",
+      "public_log_sha256": "d0dc4687c89c76dfbeff432ba5bc5a562df101ad3e7ffc29c2a42855d8787c96",
+      "suite": "libero_10",
+      "task_id": 3
+    },
+    {
+      "description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "public_log": "task-logs/004.jsonl",
+      "public_log_sha256": "be0108f4a2454ad5fbfa10cd02fd3c6dac206536596e8ddf5138175a53a22483",
+      "suite": "libero_10",
+      "task_id": 4
+    },
+    {
+      "description": "pick up the book and place it in the back compartment of the caddy",
+      "public_log": "task-logs/005.jsonl",
+      "public_log_sha256": "d04dc3ca183c972abbd2671dfd8ccaafcbd1305f19b406b8ff63d46ffaa723d8",
+      "suite": "libero_10",
+      "task_id": 5
+    },
+    {
+      "description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "public_log": "task-logs/006.jsonl",
+      "public_log_sha256": "d36176de8b6a193cb68ea19d8eaa4b686cd83ca18cc9b009d1e04f8a217aa37e",
+      "suite": "libero_10",
+      "task_id": 6
+    },
+    {
+      "description": "put both the alphabet soup and the cream cheese box in the basket",
+      "public_log": "task-logs/007.jsonl",
+      "public_log_sha256": "1d1f2d4e58e9a244f41b1c93a88f52c6df82063d5f1cf24abb0e033de0186d74",
+      "suite": "libero_10",
+      "task_id": 7
+    },
+    {
+      "description": "put both moka pots on the stove",
+      "public_log": "task-logs/008.jsonl",
+      "public_log_sha256": "543ddc41a795e67d3bdfd9931db9e627d16eee6b262b7a769e3f37667ce7ccd9",
+      "suite": "libero_10",
+      "task_id": 8
+    },
+    {
+      "description": "put the yellow and white mug in the microwave and close it",
+      "public_log": "task-logs/009.jsonl",
+      "public_log_sha256": "502494de8fffaaa04e386f308f747a3de12321be82bd2a6dd9714692d8539841",
+      "suite": "libero_10",
+      "task_id": 9
+    }
+  ]
+}
