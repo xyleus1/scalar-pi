@@ -3,7 +3,9 @@
 [![Research tests](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml)
 [![Code checks](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml)
 
-**Nima Kamali** · [Paper and data](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.0) · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
+**Nima Kamali** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
+
+**Paper:** [Scalar-potential action experts in pi0.5](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-paper.pdf) · [Editable source (v0.2.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.2.0/scalar-pi-source.zip) · [Curated data (unchanged v0.1.0)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip)
 
 Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
@@ -23,7 +25,9 @@ The completed experiment contains **nine training runs and 40,000 selected LIBER
 
 The primary P−B1 difference is **+0.30 percentage points**, with a descriptive paired 95% interval of **[−1.27, +1.75]**. This does not establish an improvement. The released policy uses a different training protocol and is a reference, not the matched control.
 
-All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper and curated results](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.0) for the complete comparisons and hardware breakdown.
+All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [expanded paper](https://github.com/xyleus1/scalar-pi/releases/tag/v0.2.0) for the complete comparisons and hardware breakdown.
+
+The v0.2.0 paper adds eight figures, a broader literature discussion, and five proposed follow-up studies. It adds **no experiments or new outcomes**: the 40,000-record dataset and reported statistics remain those of v0.1.0. The [paper guide](paper/README.md) provides figure-generation commands and primary-source evidence ledgers; other papers' results and proposed studies are explicitly separated from this study's measurements.
 
 ## Installation
 
@@ -49,7 +53,14 @@ python scripts/evaluate_potential.py configs/potential/libero_matrix.example.jso
 
 Replace the template checkpoint paths and environment prefixes before execution. The original matrix preserves seeds 17, 42, and 93, paired rollout/noise seed 7, and both solver settings.
 
-The release also includes a CPU-only replay of the reported statistics. It needs the curated dataset, not a GPU or model checkpoint.
+The release also includes a CPU-only replay of the reported statistics. Download and extract the [immutable v0.1.0 data ZIP](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.0/scalar-pi-data.zip), then run:
+
+```bash
+python paper/reproduce_descriptive.py --dataset /path/to/data --check-only
+python paper/reproduce_descriptive.py --dataset /path/to/data --output reproduced.json
+```
+
+These commands need Python 3.10+ and its standard library, not a GPU or model checkpoint. The full replay reproduces all 80 suite cells and eight original paired contrasts. See [paper/README.md](paper/README.md) for PDF and figure builds.
 
 ## Repository guide
 
