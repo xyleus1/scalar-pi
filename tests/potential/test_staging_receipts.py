@@ -10,7 +10,7 @@ import pytest
 
 @pytest.fixture
 def staging(monkeypatch):
-    path = Path(__file__).resolve().parents[2] / "scripts/lambda/staging.py"
+    path = Path(__file__).resolve().parents[2] / "scripts/potential_staging.py"
     spec = importlib.util.spec_from_file_location("staging", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -1,7 +1,7 @@
 {
   "measured_gpu": false,
   "model_kind": "pi05_full",
-  "forecast_hourly_rate_usd": 3.79,
+  "forecast_hourly_rate_usd": null,
   "session_hours": 4,
   "startup_seconds_per_session": null,
   "shutdown_reserve_seconds": 600,

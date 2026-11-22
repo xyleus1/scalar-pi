@@ -6,14 +6,14 @@ shift || true
 execute=false
 if [[ "${1:-}" == --execute ]]; then execute=true; shift; fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-root="${SCALAR_PI_ROOT:-/lambda/nfs/scalar-pi}"
-storage_root="${SCALAR_PI_STORAGE_ROOT:-/lambda/nfs/scalar-pi}"
+root="${SCALAR_PI_ROOT:-$repo/.research}"
+storage_root="${SCALAR_PI_STORAGE_ROOT:-$root}"
 export SCALAR_PI_ROOT="$root" SCALAR_PI_STORAGE_ROOT="$storage_root"
 data="$root/data"
 commit="$(git -C "$repo" rev-parse HEAD)"
 model="scalar-pi-model:$commit"
 simulator="scalar-pi-libero:$commit"
-docker=(sudo -n docker)
+docker=(docker)
 
 show() { printf '%q ' "$@"; printf '\n'; }
 if [[ "$phase" == inspect ]]; then
@@ -21,23 +21,22 @@ if [[ "$phase" == inspect ]]; then
     exit 0
 fi
 if ! $execute; then
-    show bash "$repo/scripts/lambda/run.sh" "$phase" --execute "$@"
+    show bash "$repo/scripts/docker/run_potential.sh" "$phase" --execute "$@"
     printf 'Preview only: no container, training, or simulation started.\n'
     exit 0
 fi
 [[ -z "$(git -C "$repo" status --porcelain)" ]] || { echo 'Commit source changes before execution.' >&2; exit 1; }
 mkdir -p "$data/experiments" "$root/images"
 cd "$repo"
-python3 scripts/lambda/canary.py verify --root "$root" --storage-root "$storage_root"
 archive="$root/images/$commit.tar.gz"
 receipt="$root/images/$commit.images.json"
 archive_verified=false
 
 if [[ "$phase" == build ]]; then
     if [[ -f "$archive" && ! -e "$receipt" ]]; then
-        # A prior lease ended between archive and receipt publication. Preserve
+        # A previous build stopped between archive and receipt publication. Preserve
         # the unverified archive instead of treating it as a completed build.
-        interrupted="$archive.interrupted-${SCALAR_PI_ATTEMPT:?Use the Lambda controller}"
+        interrupted="$archive.interrupted-${SCALAR_PI_ATTEMPT:?Set SCALAR_PI_ATTEMPT to a fresh build attempt name}"
         [[ ! -e "$interrupted" ]] || { echo 'Interrupted image archive already exists.' >&2; exit 1; }
         mv -- "$archive" "$interrupted"
     fi
@@ -47,11 +46,11 @@ if [[ "$phase" == build ]]; then
         "${docker[@]}" build -f examples/libero/Dockerfile -t "$simulator" .
         "${docker[@]}" image save "$model" "$simulator" | gzip -1 > "$archive.tmp"
         mv -- "$archive.tmp" "$archive"
-        python3 scripts/lambda/images.py record --receipt "$receipt" --archive "$archive" --commit "$commit" \
+        python3 scripts/potential_images.py record --receipt "$receipt" --archive "$archive" --commit "$commit" \
             --model-id "$("${docker[@]}" image inspect --format '{{.Id}}' "$model")" \
             --simulator-id "$("${docker[@]}" image inspect --format '{{.Id}}' "$simulator")"
     else
-        python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
+        python3 scripts/potential_images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
     fi
     archive_verified=true
 fi
@@ -59,13 +58,13 @@ fi
 if ! "${docker[@]}" image inspect "$model" "$simulator" >/dev/null 2>&1; then
     [[ -f "$archive" ]] || { echo 'Run the build phase first.' >&2; exit 1; }
     if ! $archive_verified; then
-        python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
+        python3 scripts/potential_images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" --hash-archive
     fi
     gzip -dc "$archive" | "${docker[@]}" image load
 fi
 model_id="$("${docker[@]}" image inspect --format '{{.Id}}' "$model")"
 simulator_id="$("${docker[@]}" image inspect --format '{{.Id}}' "$simulator")"
-python3 scripts/lambda/images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" \
+python3 scripts/potential_images.py verify --receipt "$receipt" --archive "$archive" --commit "$commit" \
     --model-id "$model_id" --simulator-id "$simulator_id"
 if [[ "$phase" == build ]]; then exit 0; fi
 export SCALAR_PI_IMAGE_ID="$model_id"
@@ -81,7 +80,7 @@ fi
 if [[ "$phase" == archive ]]; then
     # Logs and final checkpoints already live on the persistent filesystem.
     # Export their hashes without duplicating multi-GB checkpoints.
-    exec python3 scripts/lambda/matrix.py archive --root "$root" "$@"
+    exec python3 scripts/potential_matrix.py archive --root "$root" "$@"
 fi
 
 common=(run --rm --init -i --gpus all --network host --stop-timeout 120

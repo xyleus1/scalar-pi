@@ -13,7 +13,7 @@ def render_matrix(repo, root, study, *, diagnostic=False, attempt="default"):
         raise ValueError("Attempt must be a short filename component")
     filename = "libero_matrix.example.json" if study == "full" else "libero_matrix.pilot.json"
     matrix = json.loads((repo / "configs/potential" / filename).read_text())
-    wrapper = str(repo / "scripts/lambda/run.sh")
+    wrapper = str(repo / "scripts/docker/run_potential.sh")
     matrix["server_command_prefix"] = ["bash", wrapper, "server", "--execute"]
     matrix["client_command_prefix"] = ["bash", wrapper, "simulator", "--execute"]
     matrix["output_dir"] = str(root / "data/experiments/results" / study)
@@ -24,7 +24,9 @@ def render_matrix(repo, root, study, *, diagnostic=False, attempt="default"):
             run_name = f"{variant['group'].lower()}_seed{variant['training_seed']}"
             checkpoint = root / "data/experiments/checkpoints" / variant["config"] / run_name / "30000"
         variant["checkpoint_dir"] = str(checkpoint)
-    matrix["notes"] = "Rendered for Lambda; paths do not establish completed training. Validate actual checkpoints."
+    matrix["notes"] = (
+        "Rendered for local/container execution; paths do not establish completed training. Validate actual checkpoints."
+    )
     if diagnostic:
         matrix.update(
             diagnostic=True,
@@ -56,13 +58,17 @@ def archive(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("render", "archive"))
-    parser.add_argument("--root", type=Path, default=Path(os.environ.get("SCALAR_PI_ROOT", "/lambda/nfs/scalar-pi")))
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(os.environ.get("SCALAR_PI_ROOT", str(Path(__file__).resolve().parents[1] / ".research"))),
+    )
     parser.add_argument("--study", choices=("full", "pilot"), default="full")
     parser.add_argument("--diagnostic", action="store_true", help="Only four released-policy compatibility episodes")
     parser.add_argument("--attempt", default="default", help="Separate diagnostic attempts; never overwrite evidence")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[1]
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output}")
     result = (

@@ -5,6 +5,8 @@ or deserializing training_state.pt. The existing batch-selection verifier suppli
 the current experiment identity.
 """
 
+# ruff: noqa: PLC0415 -- Keep --help usable without the research environment.
+
 import argparse
 import hashlib
 import json
@@ -111,7 +113,7 @@ def main(argv=None):
     parser.add_argument("--data-manifest", type=Path, required=True)
     parser.add_argument("--qualification-report", type=Path, required=True)
     args = parser.parse_args(argv)
-    verifier = runpy.run_path(str(Path(__file__).resolve().parents[1] / "select_potential_batch.py"))
+    verifier = runpy.run_path(str(Path(__file__).with_name("select_potential_batch.py")))
     selection = verifier["verify_report"](args)
     print(json.dumps(verify_terminal(args.checkpoint, args.config, args.seed, selection), indent=2))
 

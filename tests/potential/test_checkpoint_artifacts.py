@@ -15,7 +15,7 @@ from openpi.shared.potential_checkpoint import RESEARCH_PRECISION
 
 @pytest.fixture
 def verifier():
-    path = Path(__file__).resolve().parents[2] / "scripts/lambda/verify_training.py"
+    path = Path(__file__).resolve().parents[2] / "scripts/verify_potential_training.py"
     spec = importlib.util.spec_from_file_location("verify_training", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -164,7 +164,7 @@ def test_actual_checkpoint_bytes_are_checked(verifier, tmp_path, filename):
     directory, selection = artifact(tmp_path)
     with (directory / filename).open("ab") as stream:
         stream.write(b"changed")
-    with pytest.raises(ValueError, match="hash mismatch|normalization asset"):
+    with pytest.raises(ValueError, match=r"hash mismatch|normalization asset"):
         verifier.verify_terminal(directory, "pi05_libero_potential", 42, selection)
 
 
@@ -177,7 +177,7 @@ def test_help_works_with_standard_library_only(verifier):
 
 def test_cli_verifies_base_inputs_separately_from_terminal_weights(verifier, tmp_path, monkeypatch, capsys):
     directory, selection = artifact(tmp_path)
-    selection_script = Path(verifier.__file__).parents[1] / "select_potential_batch.py"
+    selection_script = Path(verifier.__file__).with_name("select_potential_batch.py")
     selection_verifier = verifier.runpy.run_path(str(selection_script))["verify_report"]
     source = tmp_path / "source.py"
     source.write_text("# pinned experiment\n")

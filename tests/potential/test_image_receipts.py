@@ -6,7 +6,7 @@ import runpy
 
 import pytest
 
-MODULE = runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/lambda/images.py"))
+MODULE = runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/potential_images.py"))
 
 
 def test_image_cache_rejects_changed_archive_or_image(tmp_path):
