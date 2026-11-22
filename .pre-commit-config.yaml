@@ -1,4 +1,5 @@
-exclude: third_party/
+# The two paper snapshots are immutable estimator sources, checked by hash/AST tests.
+exclude: ^(third_party/|paper/reproducibility/(statistics|analysis_entrypoint)\.py$)
 
 repos:
   - repo: https://github.com/astral-sh/uv-pre-commit

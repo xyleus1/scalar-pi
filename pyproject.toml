@@ -77,7 +77,14 @@ members = ["packages/*"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["docker", "third_party", "src/openpi/models_pytorch/transformers_replace/*"]
+extend-exclude = [
+    "docker",
+    "third_party",
+    "src/openpi/models_pytorch/transformers_replace/*",
+    # Preserve the exact original estimator snapshots; dedicated tests verify them.
+    "paper/reproducibility/statistics.py",
+    "paper/reproducibility/analysis_entrypoint.py",
+]
 
 [tool.ruff.lint]
 # https://docs.astral.sh/ruff/rules/
