@@ -2,13 +2,13 @@
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
-[Paper PDF (v0.1.5)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.5/scalar-pi-paper.pdf) · [Editable source (v0.1.5)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.5/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+[Paper PDF (v0.1.6)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-paper.pdf) · [Editable source (v0.1.6)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-The v0.1.5 revision shortens the paper to ten pages and states the model, estimators,
-and proposed comparisons in mathematical form. The four figures, checkpoint
-counts, reported estimates, and five proposed studies are retained. It introduces
-no new experiments or statistical estimates. The public dataset remains the
-immutable v0.1.1 release.
+The v0.1.6 revision explains the model and proposed experiments in plain technical
+English. It introduces each calculation through the problem it solves and keeps
+the equations needed to specify it. The four figures, checkpoint counts, reported
+estimates, and five proposed studies are retained. It introduces no new experiments
+or statistical estimates. The public dataset remains the immutable v0.1.1 release.
 
 The completed observed grid contains 40,000 episodes, 800 task-evaluation runs, 20 checkpoint/K
 combinations and 80 checkpoint/K/suite cells. All selected tasks have retained

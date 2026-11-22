@@ -5,7 +5,7 @@
 
 **Nima Kamali** and **[Mert Turna](https://github.com/mmturna)** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
 
-**Paper:** [Scalar-potential action experts in π₀.₅](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.5/scalar-pi-paper.pdf) · [Editable source (v0.1.5)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.5/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+**Paper:** [Scalar-potential action experts in π₀.₅](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-paper.pdf) · [Editable source (v0.1.6)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
 Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
@@ -25,9 +25,9 @@ The completed experiment contains **nine training runs and 40,000 selected LIBER
 
 The primary P−B1 difference is **+0.30 percentage points**, with a descriptive paired 95% interval of **[−1.27, +1.75]**. This does not establish an improvement. The released policy uses a different training protocol and is a reference, not the matched control.
 
-All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.5) for the complete comparisons and hardware breakdown.
+All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.6) for the complete comparisons and hardware breakdown.
 
-The v0.1.5 paper is a shorter mathematical account of the model, estimators, results, and five proposed studies. It retains the four figures and the complete checkpoint-count table. The 40,000-record dataset and reported statistics are unchanged. The [paper guide](paper/README.md) provides reproduction commands and the [figure design notes](paper/figure-design-notes.md).
+The v0.1.6 paper explains the model and proposed experiments in plain technical English, with equations introduced after the ideas they describe. It retains the four figures, complete checkpoint-count table, and five proposed studies. The 40,000-record dataset and reported statistics are unchanged. The [paper guide](paper/README.md) provides reproduction commands and the [figure design notes](paper/figure-design-notes.md).
 
 ## Installation
 

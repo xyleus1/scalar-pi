@@ -22,143 +22,133 @@
 \begin{document}
 \maketitle
 \begin{abstract}
-We study conservative velocity parameterizations for the pretrained $\pihalf$ action expert. Scalar-Pi defines $\Psi_\theta(x,\tau,c)=x^\top f_\theta(x,\tau,c)$ and uses its full input gradient as the flow velocity. This retains the action transformer and adds no learned parameters. We compare it with direct-field controls that retain or reset the pretrained output projection. Nine training runs share a frozen-backbone protocol across three paired seeds. Evaluation covers 40,000 LIBERO episodes at one and ten Euler steps, including a separately evaluated released policy. At ten steps, Scalar-Pi achieves 91.38\% success versus 91.08\% for the matched reset control: +0.30 percentage points with a paired 95\% interval of [-1.27, +1.75]. The released policy achieves 95.85\%. The interval does not establish an improvement, and unresolved cross-device qualification limits the results to descriptive evidence. We specify five subsequent comparisons of trajectory supervision, manipulation stages, geometric symmetry, future prediction, and convex distributional generation, each with a matched direct control.
+The $\pihalf$ action expert generates robot actions by updating a noisy action sequence. We study a scalar-potential version of this expert. Scalar-Pi combines the noisy actions and the network output into one number, then takes its derivatives with respect to the noisy actions to calculate the updates. It keeps the action-expert architecture and adds no learned parameters. We compare it with two controls using the original update rule, keeping the vision-language model fixed during training. We evaluate the nine trained models and the released policy in 40,000 LIBERO episodes, using one or ten denoising steps. At ten steps, Scalar-Pi achieves 91.38\% success versus 91.08\% for its matched control: a difference of +0.30 percentage points with a paired 95\% interval of [-1.27, +1.75]. The released policy reaches 95.85\%. The interval does not establish an improvement. Numerical agreement between the H100 and A100 GPUs used for evaluation remains unresolved, which further limits the comparison. We propose five follow-up studies, each comparing scalar and direct action experts under the same training conditions.
 \end{abstract}
 
 \section{Introduction}
-Flow-based vision-language-action policies generate action chunks by integrating a conditional velocity field \cite{pi05,openpi}. We test whether restricting this field to a scalar gradient improves closed-loop success under matched adaptation of a pretrained policy.
+Vision-language-action models such as $\pihalf$ generate short sequences of robot actions from images and a language instruction \cite{pi05,openpi}. To generate a sequence, the model starts with noise. Its action expert predicts an update for each entry in that sequence, and a denoising procedure applies the updates before the robot executes the actions. We ask whether changing how the expert produces these updates can improve its performance after fine-tuning.
 
-Scalar-Pi retains the complete action transformer and forms the dot potential $\Psi_\theta=x^\top f_\theta$ from its input and vector output. The velocity is the full input gradient. This adds no parameters but changes both inference and training computation. For a $C^2$ potential, the field has a symmetric Jacobian at fixed conditioning and transport time. This constraint applies in normalized action coordinates; it provides no bound on differences between successive executed commands.
+Scalar-Pi keeps the existing action expert but derives its updates from a single scalar value. Following Sun et al.\ \cite{composing}, we multiply each noisy action entry by the corresponding network output and sum the products. We then differentiate this scalar with respect to every action entry. The resulting derivatives provide the updates used by the denoising procedure. They include how the network's output changes with its input, so computing them requires differentiation through the whole expert. The method adds no learned parameters, but it changes both inference and training computation. Figure~\ref{fig:method} shows this change.
 
-The controls separate field parameterization from output initialization. The scalar model and its primary direct control begin with identical tensors and a reset output projection. A second direct control retains the pretrained projection. All three update the action expert with the same frozen vision-language backbone, loss, and optimizer exposure. Paired training seeds and one-step and ten-step samplers define the research comparison. The released LIBERO checkpoint is evaluated separately.
+We train two controls that use the original, direct update rule. The primary control starts from exactly the same weights as Scalar-Pi, with the final output layer reset to zero. The second control retains that layer's pretrained weights. This separates the scalar change from the effect of resetting the output layer. All three models learn from the same LIBERO demonstrations while the vision-language model stays fixed. We use three shared training seeds and evaluate one and ten denoising steps with the same initial states and noise. The released LIBERO policy provides a separate reference.
 
-The observed scalar--control difference is small, its paired interval spans zero, and the released reference has higher observed success. The contribution is a controlled pretrained-expert adaptation study with reproducible outcomes and paired analysis. The subsequent studies test additional temporal, geometric, and distributional structure using matched direct controls.
+The scalar model's observed success rate is close to its matched control, and the paired uncertainty interval includes zero. The released policy has a higher observed success rate. Differences in outputs across GPU types further limit the comparison. We retain the complete episode data and paired analysis so these results can be inspected and reproduced.
+
+The next experiments will test changes to supervision, waypoint prediction, geometric symmetry, future prediction, and the way a scalar model generates action distributions. Each will include a direct model with the same inputs and training conditions. The first adds trajectory reconstruction to both scalar and direct experts. This comparison can separate the benefit of the added supervision from any benefit of the scalar architecture.
 
 \section{Related work}
 \paragraph{Flow policies.}
-Flow matching learns a vector field along a probability path \cite{flowmatching}. The $\pihalf$ system combines flow-based action generation with heterogeneous pretraining and hierarchical information \cite{pi05}. OpenPI exposes the model and LIBERO adaptation configuration used here \cite{openpi}; LIBERO provides the tasks and official initial states \cite{libero}. Studies of Euler integration motivate comparing solver-step counts rather than treating fewer steps as a lossless acceleration \cite{onestep}. Our experiment retains the original probability path, regression target, and sampler.
+Flow matching trains a model to turn noise into samples by learning the updates along a chosen path \cite{flowmatching}. In $\pihalf$, the samples are robot actions, guided by image and language features learned from several data sources \cite{pi05}. We use the model and LIBERO training configuration released in OpenPI \cite{openpi}, with the tasks and starting states provided by LIBERO \cite{libero}. Work on Euler integration shows why the number of sampling steps needs to be tested: reducing it can change the output, not just the runtime \cite{onestep}. We keep the original noise mixture, training target, and sampler so that the experiment tests the action expert.
 
 \paragraph{Scalar potentials.}
-Sun et al. form a potential from the dot product of an input and a U-Net output. They combine its associated energy with known physics for PDE fields \cite{composing}. Scalar-Pi adopts this construction inside the complete pretrained action transformer. EnergyFlow instead uses a conditional temporal U-Net, temporal pooling, and a scalar MLP; the negative energy gradient gives its conditional score \cite{energyflow}. Energy Matching studies a time-independent scalar formulation \cite{energymatching}. Equilibrium Matching learns implicit dynamics and also examines explicit scalar variants \cite{eqm}. The explicit time-conditioned potential studied here differs from those implicit and time-independent formulations.
+Sun et al. multiply an input by the corresponding output of a U-Net and sum the products to form a scalar potential. Their method combines the associated energy with known physics when generating solutions to partial differential equations \cite{composing}. We use the same scalar construction with the pretrained action transformer. EnergyFlow also differentiates a learned scalar, but builds it with a temporal U-Net, pooling across time, and a scalar output network. Its negative energy gradient gives a score used for diffusion-based action generation \cite{energyflow}.
 
-\paragraph{Structured action models.}
-The follow-up studies in Section~\ref{sec:future} draw on several forms of action structure. Hermite-VLA supervises trajectory reconstruction through a training-only head \cite{lv2026hermite}. Fast Plans, Faithful Actions studies whether a waypoint-conditioned executor follows its plans \cite{xie2026fastplans}, while $\pi_{0.7}$ uses intermediate text and visual subgoals \cite{physicalintelligence2026pi07}. SAVLA studies symmetry-aware GR00T adaptation \cite{li2026savla}; AnyCamVLA establishes multi-view augmentation as a useful control for viewpoint robustness \cite{heo2026anycam}.
+Energy Matching studies a scalar function that does not depend on sampling time \cite{energymatching}. Equilibrium Matching learns dynamics whose energy need not be represented by a separate scalar network, and also tests explicit scalar versions \cite{eqm}. Scalar-Pi instead keeps the denoising-time input and original flow-matching loss. These papers establish the use of scalar functions in generative models; our experiment asks what happens when this construction is applied to the full pretrained $\pihalf$ action expert.
 
-DYNA-2 combines action and video modeling, including offline prediction on held-out robots \cite{dyna2}, and Cosmos Policy adapts a pretrained video model for control \cite{cosmospolicy}. SaiVLA-JEPA finds no detectable aggregate gain from future targets after matching current visual features, motivating a present-frame control \cite{saivlajepa}. ESP and DriftingVLA train one-step generators with objectives that differ from conventional flow regression \cite{esp,driftingvla}.
+\paragraph{Additional supervision and planning.}
+The proposed studies in Section~\ref{sec:future} draw on methods that give the action expert more information during training. Hermite-VLA adds a head that reconstructs demonstrated movements, then removes it before deployment \cite{lv2026hermite}. Fast Plans, Faithful Actions tests whether an action model follows its predicted waypoints \cite{xie2026fastplans}, while $\pi_{0.7}$ uses intermediate instructions and visual goals \cite{physicalintelligence2026pi07}. SAVLA studies whether geometric symmetries help adapt GR00T with fewer demonstrations \cite{li2026savla}. AnyCamVLA shows that training on multiple views is itself a strong way to improve performance from new camera positions \cite{heo2026anycam}.
+
+DYNA-2 trains action and video models together, including a test of prediction on robot trajectories excluded from training \cite{dyna2}. Cosmos Policy adapts a pretrained video model for robot control \cite{cosmospolicy}. However, SaiVLA-JEPA finds no detectable overall success gain from predicting the future once the quality of current-image features is matched \cite{saivlajepa}. This makes a current-image prediction task an important control for future prediction. ESP and DriftingVLA use different training losses to generate actions in one step \cite{esp,driftingvla}; they motivate testing a new loss rather than simply taking fewer steps with the existing model.
 
 \section{Method}
-\begin{center}
-\begin{minipage}{\linewidth}
-\centering\includegraphics[width=\linewidth]{figures/method.pdf}
-\captionof{figure}{\textbf{Direct and scalar velocity fields.} The frozen VLM supplies context $c$ to the action expert. The direct model returns $f_\theta$. The scalar model forms $\Psi_\theta=x_\tau^\top f_\theta$ and evaluates its full input gradient (dashed path). Both predict ten actions and execute five per replanning cycle.}
-\label{fig:method}
-\end{minipage}
-\end{center}
 
-\subsection{Potential parameterization}
-Let $x\in\mathbb R^{HD}$ denote a vectorized action chunk, with horizon $H=10$ and dimension $D=32$. The action expert $f_\theta(x,\tau,c)$ has the same output dimension. Here $\tau$ is flow time and $c$ is the frozen image-language representation. Following the dot construction of Sun et al.\ \cite{composing}, we define
+
+\subsection{From the action expert to a scalar}
+The action expert receives a noisy action chunk, the current denoising time, and features from the images and instruction. It normally returns a vector that tells the sampler how to update the chunk. Scalar-Pi keeps this transformer and changes how its output is used.
+
+We multiply each input value by the corresponding output value and sum the products into one number, called the scalar potential. We then differentiate this number with respect to every input value. These derivatives give the vector used by the sampler. Following Sun et al.\ \cite{composing}, the calculation is
 \begin{align}
 \Psi_\theta(x,\tau,c)&=x^\top f_\theta(x,\tau,c),\\
 v_\theta(x,\tau,c)&=\nabla_x\Psi_\theta(x,\tau,c)
 =f_\theta(x,\tau,c)+J_{f_\theta}(x,\tau,c)^\top x.
 \end{align}
-The reduction sums all $HD$ coordinates. The derivative passes through every action-dependent layer, including the output projection. Detaching $f_\theta$ would remove the Jacobian term. For fixed $(\tau,c)$ and $\Psi_\theta\in C^2$,
-\begin{equation}
-J_{v_\theta}=\nabla_x^2\Psi_\theta=J_{v_\theta}^{\top}.
-\end{equation}
-This constraint holds in normalized action coordinates. It does not imply a bound on differences between successive executed commands.
+Here $x$ contains ten actions with 32 values per action, $f_\theta$ is the action transformer, $\tau$ is denoising time, and $c$ contains the image and instruction features. The sum covers all $10\times32$ values. $J_{f_\theta}$ contains the derivatives of the transformer output with respect to its input, so the second term accounts for how the transformer itself responds when the input changes. We retain that term by differentiating through every layer that depends on the actions. Stopping the derivative at the transformer output would give a different model.
 
-The dot form fixes $\Psi_\theta(0,\tau,c)=0$. This removes an additive degree of freedom without restricting the gradient when the vector function is unrestricted. For $\phi\in C^1$ on a star-shaped domain containing zero,
-\begin{equation}
-g(x)=\int_0^1\nabla\phi(sx)\,ds
-\quad\Longrightarrow\quad
-x^\top g(x)=\phi(x)-\phi(0).
-\end{equation}
-The identity follows by integrating $\frac{d}{ds}\phi(sx)$. It does not establish universality for the finite transformer used here.
+\begin{center}
+\begin{minipage}{\linewidth}
+\centering\includegraphics[width=\linewidth]{figures/method.pdf}
+\captionof{figure}{\textbf{How the two models update an action chunk.} Both models use the same images, instruction, and action transformer. The direct model uses the transformer's output as its update. Scalar-Pi first combines the input and output into one number, then differentiates that number with respect to the input (dashed path). Both generate ten actions and execute five before observing the scene again.}
+\label{fig:method}
+\end{minipage}
+\end{center}
 
-We retain the expert's 18 layers, width 1024, MLP width 4096, smooth activations, and adaptive normalization. The expert and its input, output, and time projections are trainable. The LIBERO configuration disables discrete state conditioning. Images and language condition the network; the runner executes seven of the 32 modeled action coordinates. The scalar readout adds no parameters, but evaluating $v_\theta$ requires a vector--Jacobian product. Training differentiates through this product.
+This construction requires all update components to come from the same scalar function. When that function has continuous second derivatives, the derivative of update $i$ with respect to input $j$ equals the derivative of update $j$ with respect to input $i$. This symmetry holds with the image features and denoising time fixed, in the normalized coordinates used by the model. It does not imply smoother robot motion over time. The scalar is learned from the action-prediction loss; it is not a measured task reward or physical energy.
 
-\subsection{Flow objective}
-For a normalized demonstration chunk $A$ and independent noise $\epsilon$, training uses
+We keep the expert's 18 layers, width 1024, MLP width 4096, smooth activations, and adaptive normalization. We train the expert together with its input, output, and time projections. As in the LIBERO configuration, the network receives images and language without robot state encoded as discrete tokens. The simulator executes seven of the 32 action values; all 32 remain in the model and training loss.
+
+The scalar calculation adds no learned parameters, but it adds computation. Every sampling step needs an input derivative, and training must differentiate through that derivative. Equal parameter counts therefore do not imply equal runtime or memory use.
+
+\subsection{Training loss and action generation}
+We use the original flow-matching loss for all three models. During training, we mix a demonstrated action chunk $A$ with independent Gaussian noise $\epsilon$. The sampled time $\tau$ sets the amount of noise:
 \begin{equation}
 x_\tau=(1-\tau)A+\tau\epsilon,\qquad
 u=\epsilon-A,\qquad
 \epsilon\sim\mathcal N(0,I),\quad
-\tau=0.001+0.999\,\mathrm{Beta}(1.5,1).
+\tau=0.001+0.999b,\quad b\sim\mathrm{Beta}(1.5,1).
 \end{equation}
-All models minimize mean squared velocity error over the full action tensor. Inference integrates from $\tau=1$ to $0$ with $K\in\{1,10\}$ Euler steps. Comparisons use the same terminal checkpoints and paired noise. Equal $K$ does not imply equal computational cost because the scalar model requires an input derivative.
+The target is $u$, and the loss is the mean squared difference between the predicted vector and this target over the full action chunk. To generate actions, the sampler starts from noise at $\tau=1$ and integrates backwards to $\tau=0$, using either one or ten Euler steps. We evaluate the same final checkpoints with both settings and give the models the same starting noise. A scalar-model step costs more computation because it includes the input derivative.
 
 \section{Experimental setup}
 \subsection{Training}
 \input{tables/design.tex}
-We compare three action experts (Table~\ref{tab:design}). B0 retains the pretrained output projection. B1 resets its output weights and bias to zero. P uses the scalar readout and starts from the same tensors as B1. Both reset models initially produce zero velocity; their output projections can learn on the first update.
+We compare three action experts (Table~\ref{tab:design}). B0 keeps the pretrained output layer. B1 uses the same architecture but resets that layer's weights and bias to zero. P is Scalar-Pi and starts with exactly the same weights as B1. B1 and P initially return zero updates, but their output layers can learn on the first training step. Comparing P with B1 separates the effect of the scalar calculation from the effect of resetting the output layer.
 
-Each model is trained with seeds 17, 42, and 93, giving nine runs. The dataset contains 1,693 demonstrations and 273,465 frames across 40 LIBERO tasks. Training uses 30,000 updates and effective batch size 256, with gradient accumulation. AdamW uses $(\beta_1,\beta_2)=(0.9,0.95)$, $\epsilon=10^{-8}$, weight decay $10^{-10}$, and gradient clipping at 1.0. The learning rate increases linearly to $5\times10^{-5}$ over 10,000 updates, then remains fixed. Evaluation uses the terminal EMA checkpoint, with decay 0.999.
+We train each model from \texttt{pi05\_base} with random seeds 17, 42, and 93, giving nine runs. The dataset contains 1,693 demonstrations and 273,465 frames across 40 LIBERO tasks. Each run uses 30,000 updates with an effective batch size of 256, accumulated over smaller batches. AdamW uses $(\beta_1,\beta_2)=(0.9,0.95)$, $\epsilon=10^{-8}$, weight decay $10^{-10}$, and gradient clipping at 1.0. The learning rate increases linearly to $5\times10^{-5}$ over 10,000 updates, then remains fixed. We evaluate the final exponential moving average of the weights, using decay 0.999.
 
-The vision-language backbone is frozen in BF16, except its declared FP32 embedding and normalization parameters. The action expert, optimizer, and EMA remain FP32. Execution uses eager mode and \texttt{highest} FP32 matmul precision. Checkpoint hashes and dtype checks fix the evaluated model state.
+The image and language backbone stays frozen in BF16, with its existing FP32 embedding and normalization parameters retained. The action expert, optimizer, and moving-average weights use FP32. We use eager execution and \texttt{highest} FP32 matrix-multiplication precision. Saved hashes and data-type checks identify the exact weights used for evaluation.
 
 \subsection{Evaluation}
-We evaluate Spatial, Object, Goal, and Long, each with ten tasks and 50 official initial states per task. Every checkpoint is evaluated at $K=1$ and $K=10$. The nine trained checkpoints contribute 36,000 episodes; the released \texttt{pi05\_libero} checkpoint contributes 4,000. Its training procedure differs from ours, so it serves as a separate reference. All evaluated task identities occur in the training data.
+\label{sec:evaluation}
+We evaluate the Spatial, Object, Goal, and Long suites, each with ten tasks and 50 official starting states per task. Every checkpoint runs with one and ten sampling steps, written as $K=1$ and $K=10$. Our nine trained checkpoints contribute 36,000 episodes, and the released \texttt{pi05\_libero} checkpoint contributes another 4,000. The released model was trained differently, so we report it as a separate reference. All 40 evaluation tasks also appear in the training data.
 
-Rollout and paired-noise seeds are both 7. Query noise depends deterministically on task, initial state, and query index, and is shared across methods and solver settings. The runner predicts ten actions and executes five before replanning. Settling, camera transforms, action processing, and task limits follow the pinned runner. Invalid policy actions count as failures. Four infrastructure-failure records are excluded; their recorded replacement attempts supply the corresponding outcomes.
+The rollout and noise seeds are both 7. At each policy query, the noise is determined by the task, starting state, and query index, and is shared across models and sampling settings. The controller predicts ten actions, executes five, then observes the scene again. We keep the original simulator settling period, camera transforms, action processing, and task time limits. Invalid actions count as failures. Four episodes interrupted by infrastructure failures are kept separately; the recorded replacement attempts supply their outcomes.
 
-The 800 selected task logs pass row validation and contain 40,000 unique episodes. However, hardware qualification remains incomplete. A100 PCIe fails the original fixed-input H100 comparison, and A100 SXM4 has no accepted cross-H100 result.\footnote{Across two captures, 33,120 of 33,600 A100 PCIe scalar action comparisons exceed the componentwise tolerance $10^{-5}+1.3\times10^{-6}|a_{\rm H100}|$. The threshold was not changed.} We therefore report the mixed-hardware results as descriptive estimates. Runtime records preserve GPU identity and concurrent workload; no hardware-pooled latency comparison is reported.
+The 800 task logs contain 40,000 unique episodes and pass the record checks. This does not resolve a separate numerical problem: A100 PCIe outputs differ from the H100 reference by more than the allowed tolerance, and A100 SXM4 has no accepted comparison with that reference.\footnote{Across two captures, 33,120 of 33,600 A100 PCIe scalar action comparisons exceed the componentwise tolerance $10^{-5}+1.3\times10^{-6}|a_{\rm H100}|$. The threshold was not changed.} We report the observed results, but cannot treat them as a fully controlled comparison across GPUs. The records identify the GPU and other work running alongside each task. We do not combine timings from different GPU types into a speed comparison.
 
 \subsection{Statistical analysis}
-Let $Y_{g,K,r,t,i}\in\{0,1\}$ denote episode success for model $g$, solver setting $K$, checkpoint $r$, task $t$, and initial state $i$. With $T=40$ tasks and $I=50$ starts,
-\begin{equation}
-\widehat p_{g,K}=\frac{1}{R_gTI}\sum_{r=1}^{R_g}\sum_{t=1}^{T}\sum_{i=1}^{I}Y_{g,K,r,t,i},
-\qquad
-\widehat\Delta_{10}=100(\widehat p_{P,10}-\widehat p_{B1,10}).
-\end{equation}
-Here $R_g=3$ for each trained model and $R_g=1$ for the released policy. The primary contrast $\widehat\Delta_{10}$ is measured in percentage points. Comparisons with B0, comparisons at $K=1$, and within-model solver comparisons are secondary. The analysis uses 10,000 paired percentile-bootstrap resamples with seed 0. Training-seed draws are shared between methods. Within each fixed task, initial-state draws are shared across methods and sampled seeds. Tasks and suites receive equal weight.
+For each sampling setting, success is the fraction of completed episodes in which the task succeeds. We average equally over the 40 tasks, 50 starting states, and three training seeds. The released model has only one checkpoint. Our main comparison is Scalar-Pi minus B1 at ten sampling steps, measured in percentage points. Comparisons with B0, the one-step results, and the difference between one and ten steps are secondary.
 
-The 95\% intervals describe variability across training seeds and initial states on these 40 tasks. They do not estimate generalization to new tasks. Secondary intervals are not adjusted for multiple comparisons. The released policy has one checkpoint, so its interval reflects initial-state variation only.
+We estimate 95\% intervals with 10,000 paired bootstrap resamples and analysis seed 0. Each resample draws training seeds, then starting states within each task. We use the same draws for both models, and share the starting-state draws across the sampled seeds. Tasks and suites keep equal weight. This measures variation across training runs and starting states on these 40 tasks, not performance on new tasks. We do not adjust the secondary intervals for testing multiple comparisons. For the released model, the interval reflects starting-state variation only.
 
 \section{Results}
 \subsection{Success rates}
-At $K=10$, P achieves 91.38\% success, compared with 91.08\% for B1 and 90.58\% for B0 (Figure~\ref{fig:success}). The released policy achieves 95.85\%. At $K=1$, P reaches 93.63\% and the released policy reaches 96.60\%. The released policy has a higher observed success rate at both settings.
+With ten sampling steps, Scalar-Pi succeeds in 91.38\% of episodes, compared with 91.08\% for B1 and 90.58\% for B0 (Figure~\ref{fig:success}). The released policy reaches 95.85\%. With one step, Scalar-Pi reaches 93.63\% and the released policy reaches 96.60\%. The released model has the highest observed success at both settings, although its training procedure differs from ours.
 
 \begin{center}
 \begin{minipage}{\linewidth}
 \centering\includegraphics[width=\linewidth]{figures/success_overview.pdf}
-\captionof{figure}{\textbf{Success by suite and solver setting.} Within each trained model, points show seeds 17, 42, and 93 from left to right; bars show their mean. The released policy has one checkpoint. Seed spread is not a confidence interval. All estimates use the descriptive mixed-hardware sample.}
+\captionof{figure}{\textbf{Success with one and ten sampling steps.} Within each trained model, points show training seeds 17, 42, and 93 from left to right; bars show their mean. The released policy has one checkpoint. The spread of the three points is not a confidence interval. These results include GPUs that have not passed the numerical comparison described in Section~\ref{sec:evaluation}.}
 \label{fig:success}
 \end{minipage}
 \end{center}
 
-The primary difference is +0.30 percentage points over 6,000 paired episodes per model, with 95\% interval $[-1.27,+1.75]$ (Figure~\ref{fig:contrasts}). At $K=1$, P minus B1 is +0.40 points with interval $[-1.18,+2.00]$. Neither interval establishes a success advantage. The one-step setting exceeds the ten-step setting for each trained model, but this comparison does not measure inference speed.
+In our main comparison, Scalar-Pi exceeds B1 by 0.30 percentage points across 6,000 paired episodes per model. The 95\% interval is $[-1.27,+1.75]$ (Figure~\ref{fig:contrasts}), so the data remain consistent with either a small gain or a small loss. With one sampling step, the difference is +0.40 points with interval $[-1.18,+2.00]$. Neither result establishes an advantage. Each trained model succeeds more often with one step than with ten, but this experiment does not measure how much faster inference would be.
 
 \begin{center}
 \begin{minipage}{\linewidth}
 \centering\includegraphics[width=\linewidth]{figures/contrast_intervals.pdf}
-\captionof{figure}{\textbf{Paired success differences.} Points and bars show estimates and 95\% percentile-bootstrap intervals. Each trained-model contrast uses 6,000 paired episodes; the released-policy contrast uses 2,000. The primary contrast is bold. Secondary intervals are not multiplicity adjusted.}
+\captionof{figure}{\textbf{Differences in success rates.} Points show the estimated differences and bars show 95\% bootstrap intervals. Each comparison between trained models uses 6,000 paired episodes; the released-policy comparison uses 2,000. The main comparison is bold. The secondary intervals are not adjusted for testing multiple comparisons.}
 \label{fig:contrasts}
 \end{minipage}
 \end{center}
 
 \subsection{Task variation}
-The Long suite contains opposing task-level effects (Figure~\ref{fig:tasks}). At $K=10$, placing both moka pots on the stove succeeds in 53.3\% of P rollouts, 35.3\% of B1 rollouts, and 38.0\% of released-policy rollouts. On the two-mug placement task, the rates are 64.0\%, 73.3\%, and 100\%, respectively. These examples were selected after evaluation. The moka-pot difference reverses at $K=1$: P reaches 38.0\% and the released policy reaches 58.0\%.
+The small overall difference hides much larger changes on individual tasks (Figure~\ref{fig:tasks}). With ten sampling steps, Scalar-Pi places both moka pots on the stove in 53.3\% of episodes, compared with 35.3\% for B1 and 38.0\% for the released policy. On the two-mug placement task, the same models reach 64.0\%, 73.3\%, and 100\%. We selected these examples after seeing the results. Even the moka-pot advantage depends on the sampling setting: with one step, Scalar-Pi reaches 38.0\% and the released policy reaches 58.0\%.
 
 \begin{center}
 \begin{minipage}{\linewidth}
 \centering\includegraphics[width=\linewidth]{figures/task_differences.pdf}
-\captionof{figure}{\textbf{Long-suite results at $K=10$.} Left: P minus B1 and P minus the released policy, using trained-model means across three seeds. Right: individual seed results for two selected tasks. Dashed lines show the released checkpoint. Complete task arrays are included with the source.}
+\captionof{figure}{\textbf{Long-suite results with ten sampling steps.} Left: Scalar-Pi minus B1 and Scalar-Pi minus the released policy, averaging each trained model over three seeds. Right: the three training runs on two selected tasks. Dashed lines show the released checkpoint. The source archive contains results for every task.}
 \label{fig:tasks}
 \end{minipage}
 \end{center}
 
-The saved records contain no per-step action or state trajectories. They cannot resolve jerk, grasp timing, or command jumps at replanning boundaries. The scalar constraint alone provides no evidence of smoother physical motion.
+We did not save actions and robot states at every simulation step, so these records cannot tell us whether Scalar-Pi produces smoother movements, grasps objects at better times, or makes smaller command changes when it replans. Those questions require new measurements; they do not follow from the scalar construction.
 
 \input{future-work.tex}
 
 \section{Conclusion}
-Scalar-Pi imposes a conservative velocity field on a pretrained $\pihalf$ action expert through the full gradient of $x^\top f_\theta$. The observed gain over the matched direct model is small, and its descriptive paired interval includes zero. The experiment uses three training seeds, a frozen backbone, and training task identities. Incomplete hardware qualification further limits the comparison. The proposed extensions test whether additional supervision or geometric and distributional constraints improve this result.
-
-\paragraph{Code and data.}
-The release contains 40,000 selected episodes, all task outcomes, excluded failure records, checkpoint/configuration hashes, and the pinned analysis. Source arrays and scripts reproduce the figures, tables, and original paired intervals without a GPU.
-
-Scientific worker: \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}.
+Scalar-Pi keeps the pretrained $\pihalf$ action transformer and derives its sampling updates from a learned scalar function. In this experiment, that change gives only a small observed gain over the matched direct model, with an uncertainty interval that includes zero. We trained three seeds per model, kept the image and language backbone frozen, and evaluated tasks that also appear in training. The unresolved differences between GPU outputs further limit the result. The next studies will test whether the scalar model benefits from learning movement shape, manipulation stages, geometric symmetries, or the effects of actions, and whether a different loss can support one-step generation.
 
 \clearpage
 \appendix
@@ -166,6 +156,11 @@ Scientific worker: \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}.
 Table~\ref{tab:observed} lists all checkpoint counts. Each solver setting uses 40 tasks and 50 initial states per task. Complete task-level outcomes and paired arrays accompany the release.
 \label{app:counts}
 \input{tables/results.tex}
+
+\paragraph{Code and data.}
+The release includes the 40,000 selected episodes, results for every task, excluded failure records, checkpoint and configuration hashes, and the analysis code used for this paper. The included data and scripts reproduce the figures, tables, and paired intervals without a GPU.
+
+Scientific worker: \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}.
 
 \begingroup\footnotesize\setlength{\parskip}{0pt}
 \bibliographystyle{plainnat}

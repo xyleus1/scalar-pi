@@ -1,77 +1,78 @@
 \section{Future work}
 \label{sec:future}
-The following architectures are proposed and have not been implemented. Each study pairs direct and scalar experts with matched initialization, data, and update exposure. Trajectory supervision is the first planned experiment.
+We propose five follow-up studies. These architectures have not been implemented or evaluated. Each study will train both a direct expert and a scalar expert from the same starting weights, with the same data and number of updates, so that any benefit from the new component can be separated from the benefit of scalar structure. We will begin with trajectory supervision because it uses the existing demonstrations and adds only a small training head.
 
-\subsection{Trajectory supervision}
+\subsection{Learning the shape of a movement}
 \label{sec:trajectory}
-An auxiliary head reconstructs two cubic Hermite segments for each of the six arm controls over a ten-action chunk. For fixed segment intervals,
+The first study adds a training task: reconstruct the demonstrated arm-command sequence as two consecutive cubic curves. A small head reads pooled features from the action expert and predicts two cubic Hermite segments for each of the six continuous arm controls across ten actions. Each segment is specified by its endpoint values, $p_0,p_1$, and endpoint slopes scaled to the segment interval, $m_0,m_1$. At relative position $s$ within the segment,
 \begin{equation}
 q(s)=(2s^3-3s^2+1)p_0+(s^3-2s^2+s)m_0+(-2s^3+3s^2)p_1+(s^3-s^2)m_1,
 \quad s\in[0,1].
 \end{equation}
-The head maps pooled action-expert features to endpoints and segment-scaled tangents. Decoding these coefficients at the command times gives the training objective
+Evaluating the curves at the ten command times gives a reconstructed arm sequence $\widehat A_{\rm arm}$. We keep the flow loss and add ten times the mean squared reconstruction error:
 \begin{equation}
 \mathcal L=\mathcal L_{\rm flow}+10\,\operatorname{MSE}(\widehat A_{\rm arm},A_{\rm arm}).
 \end{equation}
-Gripper supervision remains unchanged, and the auxiliary head is removed at deployment. The proposed biased $1024\!\to\!512\!\to\!512\!\to\!48$ MLP adds 812,080 parameters, about 0.19\% of the trainable parameters \cite{lv2026hermitecode}.
+The gripper retains its original training target. The extra head is removed after training, so its role is to improve the features used by the action expert. The proposed MLP has layer widths $1024\!\to\!512\!\to\!512\!\to\!48$, including biases, and adds 812,080 parameters, about 0.19\% of the trainable parameters in the present study \cite{lv2026hermitecode}.
 
-Hermite-VLA reports an overall improvement from 95.9\% to 98.7\%, while its one-segment variant reaches 93.7\% \cite{lv2026hermite}. The planned factorial comparison crosses direct/scalar experts with no auxiliary loss, Hermite reconstruction, and an equally sized cosine-basis head. Feature access, coefficient counts, and loss scales are matched. Measurements include held-out reconstruction error, success, gripper timing, segment-join error, and replanning discontinuities. The direct/scalar difference within each supervision condition tests the scalar contribution.
+Hermite-VLA reports overall success rising from 95.9\% to 98.7\%, while its one-segment version reaches 93.7\% \cite{lv2026hermite}. This motivates testing the choice of reconstruction target. For both direct and scalar experts, we will compare no extra loss, the Hermite head, and an equally sized head that reconstructs commands with cosine functions. The heads will receive the same features and use the same number of coefficients and loss scaling. Measurements will include reconstruction error on held-out demonstrations, task success, gripper timing, and command jumps at segment joins and replanning boundaries. Independently predicted segments can disagree at their join, so smooth curves alone do not ensure smooth executed commands. Comparing direct and scalar models under each loss will show whether an improvement comes from supervision or from scalar structure.
 
-\subsection{Stage prediction}
-A stage predictor maps images, the instruction, current robot state, and a short causal state history to the next gripper event, its end-effector pose, and time remaining. Demonstration labels follow a fixed extraction rule; terminal poses carry an explicit no-further-event label. The predicted waypoint conditions several expert layers.
+\subsection{Predicting the next manipulation stage}
+This study gives the action expert a prediction of the next important event in the task. A predictor will read images, the instruction, the current robot state, and a short history of past states. It will estimate the next gripper opening or closing, the end-effector pose at that event, and the time remaining. A fixed event-detection rule will produce labels from demonstrations. When no further event occurs, the target will be the final pose with an explicit no-further-event label. Several action-expert layers will receive the predicted pose and event information during execution.
 
-Waypoint hierarchies and $\pi_{0.7}$ motivate this design \cite{xie2026fastplans,physicalintelligence2026pi07}. The comparison includes state alone, state with history, and state with history and predicted waypoints, with identical inputs for direct and scalar models. Erased or swapped waypoints on development resets test whether execution depends on the prediction. Simulator outcomes for first-object placement, second-object acquisition, and final retention distinguish stages that existing timeout records cannot resolve.
+Waypoint-based policies and $\pi_{0.7}$ motivate this approach \cite{xie2026fastplans,physicalintelligence2026pi07}. We will compare state alone, state with history, and state with history and predicted events, giving direct and scalar experts the same inputs. Removing or swapping predictions on development episodes will test whether the expert uses them. New simulator measurements will record first-object placement, second-object acquisition, and whether both objects remain at their targets. These measurements can distinguish failures that the existing timeout records cannot explain.
 
-\subsection{Geometric invariance}
-Arm commands use calibrated gripper-relative coordinates, with equal normalization scales across axes mixed by tabletop yaw and an invariant gripper command. Let $R$ be an orthogonal action representation and $T_R$ its context transform. The proposed potential satisfies
+\subsection{Sharing movements across coordinate frames}
+A geometric symmetry could let the model reuse a learned movement when its coordinates change. The proposed expert will express arm commands relative to the calibrated gripper frame. Axes mixed by a rotation about the tabletop normal will share a normalization scale, and the gripper command will remain unchanged. Let $R$ be the orthogonal transformation of action coordinates and $T_Rc$ the corresponding transformation of the context. If the scalar potential keeps the same value under this joint transformation, its gradient rotates with the actions:
 \begin{equation}
 \Psi_\theta(Rx,\tau,T_Rc)=\Psi_\theta(x,\tau,c)
 \quad\Longrightarrow\quad
 \nabla_{Rx}\Psi_\theta(Rx,\tau,T_Rc)=R\nabla_x\Psi_\theta(x,\tau,c).
 \end{equation}
-The implication requires differentiability, orthogonality of $R$, and invariance of every action-dependent path. An invariant network or finite-group averaging can enforce the premise; averaging gives exact symmetry only for that group. The coordinate action must include geometric context; image features require a defined transformation law. Passive coordinate changes and active scene rotations require separate tests. Distributional equivariance also requires compatible noise and sampling.
+The implication holds where the potential is differentiable. Every part of the potential that depends on the actions must obey the symmetry. Possible constructions include a network designed to be invariant or an average of scalar outputs over a finite rotation group; the latter gives exact invariance only for that group. Image features need a defined transformation rule, and a claim about the distribution of generated actions also requires the noise and sampling procedure to respect the symmetry. Changing coordinates and physically rotating a scene are separate tests: the latter can change visibility and the meaning of instructions such as ``left plate.''
 
-AnyCamVLA's multi-view control improves novel-view success from 69.9\% to 87.2\%, motivating a strong augmentation baseline \cite{heo2026anycam}. Following data-efficiency studies such as SAVLA \cite{li2026savla}, the comparison includes augmentation, relative-coordinate direct, equivariant direct, and invariant scalar models. Calibrated rerenders share source-trajectory splits. Outcomes comprise numerical equivariance error and success across demonstration budgets and held-out viewpoints.
+AnyCamVLA's multi-view control improves success from 69.9\% to 87.2\% on novel views, which makes ordinary augmentation an essential control \cite{heo2026anycam}. Following data-efficiency studies such as SAVLA \cite{li2026savla}, we will compare augmentation, a direct expert using the same relative coordinates, a direct expert whose outputs rotate with its inputs, and the invariant scalar expert. Calibrated rerenders of a source trajectory will stay in the same data split. Tests will measure success with fewer demonstrations and unseen viewpoints, together with numerical error in the symmetry relation.
 
-\subsection{Future prediction}
-Given policy features and five demonstrated actions, a training-only predictor estimates the target
+\subsection{Predicting the effect of five actions}
+During training, a small predictor will take the policy's current features and the next five demonstrated actions. Its target is the change in image features after those actions. A frozen copy of the public image encoder, denoted by $e$, supplies that target:
 \begin{equation}
-\Delta e_t=\operatorname{stopgrad}\bigl(e(I_{t+5})-e(I_t)\bigr),
+\Delta e_t=\operatorname{stopgrad}\bigl(e(I_{t+5})-e(I_t)\bigr).
 \end{equation}
-where $e$ is a frozen public image encoder. Predictor gradients update the shared policy representation. Image/action windows remain within episodes, and all controls receive the same backbone updates.
+Here $I_t$ is the current image, and $\operatorname{stopgrad}$ blocks gradients through the target features. The target encoder remains frozen, while the prediction loss updates the features shared with the policy. Each image/action window must come from one episode, and all comparison models will update the same policy layers. The extra predictor is removed for deployment.
 
-DYNA-2 motivates future supervision, while SaiVLA-JEPA finds no detectable aggregate closed-loop gain after matching current features \cite{dyna2,saivlajepa}. Controls comprise current-frame, action-conditioned future-change, and within-task shuffled-future supervision at matched capacity and cost. Swapped action prefixes from identical simulator states test action sensitivity. The primary outcome is closed-loop success relative to the current-frame control.
+DYNA-2 motivates learning from future observations, while SaiVLA-JEPA finds no detectable aggregate success gain once the current visual features are matched \cite{dyna2,saivlajepa}. We will therefore compare supervision from the current frame, the true future change, and shuffled future targets from the same task, at matched model size and training cost. From identical simulator states, different action sequences will test whether the predicted change follows what the robot actually does. The main comparison is task success against the current-frame control.
 
-\subsection{Convex generation}
+\subsection{Generating an action distribution in one step}
 \label{sec:convex}
-For $x_\tau=(1-\tau)A+\tau\epsilon$, ideal endpoint regression gives
+The final proposal changes the training objective so that a single generation step can preserve several valid movements. With the current noise mixture $x_\tau=(1-\tau)A+\tau\epsilon$, an ideal regression model evaluated at pure noise would give
 \begin{equation}
 v^*(z,1,c)=z-\mathbb E[A\mid c],\qquad z-v^*(z,1,c)=\mathbb E[A\mid c].
 \end{equation}
-This assumes independent noise and an endpoint value or regular extension to $\tau=1$, which continuous-time training samples with zero probability. It applies to both ideal direct and scalar regression; finite learned networks need not satisfy it.
+Thus one ideal Euler step returns the mean action chunk for the observation. Averaging distinct valid movements may produce an unsuitable command. This calculation assumes independent noise and a well-defined regression value at $\tau=1$, or a sufficiently regular extension to that endpoint. Continuous-time training samples the exact endpoint with zero probability, so the calculation does not determine what a finite trained network will do. The same reasoning applies to the ideal direct model.
 
-The proposed distributional model samples a categorical gripper schedule $G$ and generates arm commands through
+The proposed generator will first sample a ten-step gripper schedule $G$. Given that schedule and the scene, it will convert 60 Gaussian noise values into six arm-control values at each of ten steps:
 \begin{equation}
 \widehat A=\nabla_z\Phi_\theta(z,c,G),\qquad z\sim\mathcal N(0,I_{60}),\qquad
-\Phi_\theta(\cdot,c,G)\text{ convex}.
+\Phi_\theta(\cdot,c,G)\text{ convex in }z.
 \end{equation}
-An input-convex network uses nonnegative hidden-to-hidden weights, convex nondecreasing activations, and affine noise skips \cite{icnn}. Conditioning must preserve convexity in noise. Schedules receive categorical log loss. Arms, conditioned on demonstrated schedules, receive
+An input-convex network can enforce the last condition through nonnegative hidden-to-hidden and hidden-to-output weights, convex nondecreasing activations, and affine connections from the noise input \cite{icnn}. The scene and gripper schedule must be incorporated without breaking convexity in $z$. The gripper predictor will use categorical log loss and must represent the switches observed in the demonstrations. During training, the arm generator receives the demonstrated schedule; during execution, it receives a sampled schedule.
+
+The arm loss is the energy score. It compares generated chunks with the demonstrated chunk and with another independent generated chunk:
 \begin{equation}
 \mathcal L_{\rm ES}=\mathbb E\lVert\widehat A-A\rVert_2
--\tfrac12\mathbb E\lVert\widehat A-\widehat A'\rVert_2,
+-\tfrac12\mathbb E\lVert\widehat A-\widehat A'\rVert_2.
 \end{equation}
-using generated draws independent of each other and the target conditional on $(c,G)$. Schedule support retains observed multi-switch chunks.
+Both generated chunks use the same scene and gripper schedule, with independent noise draws that are also independent of the demonstrated arm target given that scene and schedule. If the model can represent the true conditional distribution, that distribution uniquely minimizes the expected energy score, provided all distributions have finite expected norm \cite{gneitingraftery2007}. Among maps that turn Gaussian noise into the target distribution, a convex-gradient map minimizes the expected squared distance between each noise sample and its generated action. This map is unique except on a set of probability zero, assuming the target has finite expected squared norm \cite{brenier1991,mccann1995}. These results describe the desired solution; they do not establish that training will find it. Targets concentrated on discrete points or lower-dimensional sets may require a potential that is not smooth.
 
-The energy score is strictly proper for distributions with finite first moments. If the model family contains the target conditional distribution, that distribution uniquely minimizes the population loss \cite{gneitingraftery2007}. If a convex gradient transports Gaussian noise to a target with finite second moments, it is the almost-everywhere unique quadratic-cost optimal transport map \cite{brenier1991,mccann1995}. Finite-network approximation and optimization remain empirical questions; singular targets may require nonsmooth potentials.
-
-ESP and DriftingVLA provide one-step baselines \cite{esp,driftingvla}. An unrestricted generator provides the matched control, sharing the gripper head, loss, noise draws, and budget. Gaussian tests assess distribution recovery for both models and the convex model's agreement with the analytic transport map. Robot tests measure success, calibration, and latency including the input derivative.
+ESP and DriftingVLA provide relevant one-step comparisons \cite{esp,driftingvla}. Our direct control will use the same gripper head, energy score, noise draws, and training budget, without the convex-gradient constraint. Initial tests with Gaussian targets will check distribution recovery for both models and the known optimal transport map for the convex model. Robot tests will then compare task success, how well sampled actions represent held-out demonstrations, and total inference time including the scalar input derivative.
 
 \subsection{Evaluation}
 \label{sec:confirmation}
-The evaluation will compare full-model direct/scalar pairs initialized from \texttt{pi05\_base}, with matched inputs, losses, and backbone updates. A separate \texttt{pi05\_libero} rerun uses its own normalization. This comparison requires conditioning-backbone gradients in the trainer. The protocol retains ten predicted actions, five executed actions, original task limits, paired resets/noise, and one qualified hardware family. Flow policies use $K=1,10$; endpoint generators use one call. We will report success, GPU-hours, memory, and inference cost.
+The next studies will start direct and scalar models from \texttt{pi05\_base}, train the full models with matched inputs and losses, and separately rerun \texttt{pi05\_libero} with its own normalization.
+The trainer must allow the policy loss to update the vision--language backbone in both models. Each policy will predict ten actions, execute five, and use the original task limits. Comparisons will share initial simulator states and noise draws and use one GPU type that has passed the numerical checks. Flow policies will be tested with one and ten sampling steps; the new generators will use one generation step. We will report success, GPU-hours, memory use, and inference time.
 
-Selection uses development resets, followed by the official $40\times50$ starts and confirmation of one finalist on sealed fresh resets. The planned budget is ten paired training seeds and 100 fresh starts per task, subject to pilot variance. Fresh starts require a pinned independent sampler: the release provides only 50 fixed starts. Sealed-state hashes and validity rules are fixed before policy comparison. Paired intervals cover training seeds and shared starts over the fixed 40-task benchmark.
+Development episodes will guide model selection. We will also replay the official 40 tasks with 50 initial states per task, then test one selected model on fresh states reserved for confirmation. The planned budget is ten paired training seeds and 100 fresh starts per task; pilot variation will determine whether more are needed. The public benchmark supplies only 50 fixed starts, so fresh states require an independent sampler from the same task distributions. The sampling procedure, validity rules, and hashes of the reserved states will be fixed before comparison. Confidence intervals will account for variation across training seeds and shared starts on these 40 tasks.
 
-Let $\widehat\Delta$ be the estimated gain over the matched direct model, in percentage points, and $L_{.95}$ the lower endpoint of its paired 95\% confidence interval. The proposed criterion is $\widehat\Delta\geq1$ with $L_{.95}>0$. A claim that the true gain exceeds one point requires $L_{.95}>1$. Corrected LIBERO-Plus provides the planned robustness test \cite{liberoplus,lajepa}.
+We will count an estimated gain of at least one percentage point over the matched direct model as a practical improvement only if the lower end of its paired 95\% confidence interval is above zero. To claim that the true gain exceeds one point, that lower bound must itself exceed one point. Corrected LIBERO-Plus will test robustness separately \cite{liberoplus,lajepa}.
 
-Nested budgets contain 5, 10, 20, and all demonstrations per task: 200, 400, 800, and 1,693 total. Models share whole-episode splits and subset-fitted normalization. A 400-demo candidate must beat its matched direct control. If its lower confidence bound against the 1,693-demo direct model also exceeds the predeclared $-1$-point noninferiority margin, it supports comparable success with 4.23 times fewer downstream demonstrations. This claim concerns adaptation from the shared pretrained base.
+Data-efficiency experiments will use nested sets of 5, 10, 20, and all demonstrations per task: 200, 400, 800, and 1,693 demonstrations in total. Direct and scalar models will use the same whole demonstrations and normalization fitted only to the selected training subset. A candidate trained on 400 demonstrations must first beat the direct model trained on those same 400. If the lower confidence bound on its difference from the 1,693-demo direct model is also above $-1$ percentage point, it meets the predeclared one-point noninferiority margin. That would support comparable success with 4.23 times fewer downstream demonstrations, starting from the same pretrained base.
