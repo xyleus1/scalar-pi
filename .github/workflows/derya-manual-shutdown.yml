@@ -1,0 +1,69 @@
+name: Derya manual instance deadline
+on:
+  workflow_dispatch:
+    inputs:
+      deadline_unix:
+        description: Finite UTC Unix work deadline for the seven assigned instances
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    if: github.repository == 'xyleus1/scalar-pi' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    environment: lambda-cleanup
+    strategy:
+      fail-fast: false
+      matrix:
+        target_index: [0, 1, 2, 3, 4, 5, 6]
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
+      TARGET_INDEX: ${{ matrix.target_index }}
+      DEADLINE_UNIX: ${{ inputs.deadline_unix }}
+    steps:
+      - name: Record execution window
+        run: echo "WATCHDOG_JOB_STARTED_UNIX=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Check out trusted source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Arm existing instance
+        env:
+          DERYA_MANUAL_ROSTER: ${{ secrets.DERYA_MANUAL_ROSTER }}
+          DERYA_MANUAL_KEY_AUDIT: ${{ secrets.DERYA_MANUAL_KEY_AUDIT }}
+          LAMBDA_DERYA_TERMINATE_API_KEY: ${{ secrets.LAMBDA_DERYA_TERMINATE_API_KEY }}
+        run: python3 scripts/lambda/manual_watchdog.py arm
+
+      - name: Publish armed receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: manual-armed-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target_index }}
+          path: manual-watchdog/armed.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Watch existing instance deadline
+        if: ${{ !cancelled() && hashFiles('manual-watchdog/armed.json') != '' }}
+        env:
+          DERYA_MANUAL_ROSTER: ${{ secrets.DERYA_MANUAL_ROSTER }}
+          DERYA_MANUAL_KEY_AUDIT: ${{ secrets.DERYA_MANUAL_KEY_AUDIT }}
+          LAMBDA_DERYA_TERMINATE_API_KEY: ${{ secrets.LAMBDA_DERYA_TERMINATE_API_KEY }}
+        run: python3 scripts/lambda/manual_watchdog.py watch
+
+      - name: Preserve result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: manual-result-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target_index }}
+          path: manual-watchdog/
+          if-no-files-found: warn
+          retention-days: 30
