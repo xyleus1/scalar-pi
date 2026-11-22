@@ -36,5 +36,6 @@ torchvision==0.22.1+cpu
 jaxlib==0.5.3
 pytest==8.3.5
 hatchling==1.27.0
+editables==0.5
 msgpack
 websockets

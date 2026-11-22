@@ -649,6 +649,11 @@ draccus==0.10.0 \
     #   -c requirements/ci-canonical-constraints.txt
     #   lerobot
     # from https://pypi.org/simple
+editables==0.5 \
+    --hash=sha256:309627d9b5c4adc0e668d8c6fa7bac1ba7c8c5d415c2d27f60f081f8e80d1de2 \
+    --hash=sha256:61e5ffa82629e0d8bfe09bc44a07db3c1ab8ed1ce78a6980732870f19b5e7d4c
+    # via -r requirements/ci-cpu.in
+    # from https://pypi.org/simple
 einops==0.8.1 \
     --hash=sha256:919387eb55330f5757c6bea9165c5ff5cfe63a642682ea788a6d472576d81737 \
     --hash=sha256:de5d960a7a761225532e0f1959e5315ebeafc0cd43394732f103ca44b9837e84
