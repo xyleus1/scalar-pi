@@ -1,7 +1,6 @@
 """Offline public-artifact checks; no GPU, dataset download, or bootstrap run."""
 
 import ast
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -36,7 +35,7 @@ class PublicPaperTests(unittest.TestCase):
         active = ast.parse((ROOT / "src/openpi/research/evaluation_statistics.py").read_bytes())
         for node in active.body:
             if isinstance(node, ast.FunctionDef) and node.name in proof["original_functions"]:
-                sha = hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+                sha = REPLAY.ast_fingerprint(node)
                 assert sha == proof["original_functions"][node.name]
         assert manifest["training_seeds"] == [17, 42, 93]
         assert manifest["num_steps"] == [1, 10]

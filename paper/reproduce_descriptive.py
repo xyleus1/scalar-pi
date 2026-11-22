@@ -53,6 +53,31 @@ def digest(path):
     return h.hexdigest()
 
 
+def ast_fingerprint(node):
+    """Use the retained Python 3.13 dump representation on Python 3.10+.
+
+    Python 3.13 omits empty list fields by default; older ast.dump versions do
+    not. No source or AST nodes are changed. This preserves the existing pinned
+    historical proof instead of weakening or replacing it.
+    """
+
+    def render(value):
+        if isinstance(value, ast.AST):
+            fields = []
+            for name, child in ast.iter_fields(value):
+                if child is None and getattr(type(value), name, Ellipsis) is None:
+                    continue
+                if isinstance(child, list) and not child:
+                    continue
+                fields.append(f"{name}={render(child)}")
+            return f"{type(value).__name__}({', '.join(fields)})"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(child) for child in value) + "]"
+        return repr(value)
+
+    return hashlib.sha256(render(node).encode()).hexdigest()
+
+
 def statistics_api(expected):
     pins = json.loads((HERE / "reproducibility/sources.json").read_bytes())
 
@@ -93,12 +118,9 @@ def statistics_api(expected):
         namespace,
     )
 
-    def node_sha(n):
-        return hashlib.sha256(ast.dump(n, include_attributes=False).encode()).hexdigest()
-
     proof = {
-        "original_functions": {name: node_sha(n) for name, n in functions.items()},
-        "original_comparison_bodies": [node_sha(n) for n in (compare, loop, integration)],
+        "original_functions": {name: ast_fingerprint(n) for name, n in functions.items()},
+        "original_comparison_bodies": [ast_fingerprint(n) for n in (compare, loop, integration)],
     }
     require(all(proof[k] == expected["source_proof"][k] for k in proof), "Original statistical body differs")
     return namespace, json.loads(pinned("manifest.json")), proof
