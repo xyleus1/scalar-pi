@@ -3,7 +3,7 @@
 [![Research tests](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/research-cpu.yml)
 [![Code checks](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/xyleus1/scalar-pi/actions/workflows/pre-commit.yml)
 
-**Nima Kamali** · [Paper and data](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.0) · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
+**Nima Kamali** and **[Mert Turna](https://github.com/mmturna)** · [Paper and data](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.1) · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
 
 Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
@@ -23,7 +23,7 @@ The completed experiment contains **nine training runs and 40,000 selected LIBER
 
 The primary P−B1 difference is **+0.30 percentage points**, with a descriptive paired 95% interval of **[−1.27, +1.75]**. This does not establish an improvement. The released policy uses a different training protocol and is a reference, not the matched control.
 
-All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper and curated results](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.0) for the complete comparisons and hardware breakdown.
+All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper and curated results](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.1) for the complete comparisons and hardware breakdown.
 
 ## Installation
 
