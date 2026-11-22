@@ -1,0 +1,3 @@
+# These retained source snapshots have byte-level provenance pins.
+reproducibility/statistics.py -text
+reproducibility/analysis_entrypoint.py -text

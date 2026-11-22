@@ -1,0 +1,21 @@
+Copyright (c) 2026 Nima Kamali
+
+The original manuscript, original figures/tables, and original study results in
+paper/ and results/, and the curated results dataset published with this release,
+are licensed under the Creative Commons Attribution 4.0 International license
+(CC BY 4.0):
+
+https://creativecommons.org/licenses/by/4.0/
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+Attribute Nima Kamali, cite the study and version, link to this license, and
+indicate changes. No endorsement is implied.
+
+This grant does not replace third-party licenses. Software, including the
+analysis and build scripts and retained OpenPI statistical source snapshots,
+remains under Apache License 2.0 (see LICENSE). OpenPI, LIBERO, pretrained weights,
+Gemma-derived models, and other third-party material retain their respective
+licenses and attribution requirements. Checkpoint weights and training data are
+not included in the curated results release. LICENSE_GEMMA.txt is retained for
+the relevant model terms. Bibliographic references do not grant rights to the
+cited works. CC BY 4.0 does not assert hardware qualification or model safety.

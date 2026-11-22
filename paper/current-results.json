@@ -1,0 +1,190 @@
+{
+  "as_of_utc": "22 November 2026, 14:43 UTC",
+  "checkpoint_results": [
+    {
+      "checkpoint_id": "B0-seed17",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1841,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B0-seed17",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1822,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B0-seed42",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1859,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "B0-seed42",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1793,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "B0-seed93",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1847,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B0-seed93",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1820,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B1-seed17",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1879,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B1-seed17",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1841,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B1-seed42",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1856,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "B1-seed42",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1809,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "B1-seed93",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1859,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "B1-seed93",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1815,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "P-seed17",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1861,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "P-seed17",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1822,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "P-seed42",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1865,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "P-seed42",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1827,
+      "validated": 2000
+    },
+    {
+      "checkpoint_id": "P-seed93",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1892,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "P-seed93",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1834,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "released-pi05-libero",
+      "num_steps": 1,
+      "observed": 2000,
+      "successes": 1932,
+      "validated": 0
+    },
+    {
+      "checkpoint_id": "released-pi05-libero",
+      "num_steps": 10,
+      "observed": 2000,
+      "successes": 1917,
+      "validated": 0
+    }
+  ],
+  "coverage": {
+    "excluded_observed_identities": {},
+    "identities_with_neither_arm": 0,
+    "observed_training_seed_task_cells": 120,
+    "pair_counts_by_device": {
+      "NVIDIA A100-PCIE-40GB": 1150,
+      "NVIDIA A100-SXM4-40GB": 750,
+      "NVIDIA H100 PCIe": 4100
+    },
+    "paired_episodes": 6000,
+    "planned_pairs": 6000,
+    "planned_training_seed_task_cells": 120,
+    "remaining_pairs": 0,
+    "suite_tasks": {
+      "libero_10": 10,
+      "libero_goal": 10,
+      "libero_object": 10,
+      "libero_spatial": 10
+    },
+    "training_seed_device_pairs": {
+      "17": {
+        "NVIDIA H100 PCIe": 2000
+      },
+      "42": {
+        "NVIDIA H100 PCIe": 2000
+      },
+      "93": {
+        "NVIDIA A100-PCIE-40GB": 1150,
+        "NVIDIA A100-SXM4-40GB": 750,
+        "NVIDIA H100 PCIe": 100
+      }
+    },
+    "training_seed_pairs": {
+      "17": 2000,
+      "42": 2000,
+      "93": 2000
+    }
+  },
+  "distinct_episodes": 40000,
+  "kind": "scalar_pi_combined_observed_results_v1",
+  "matched_pairs": 6000,
+  "methods_sentence": "For the current snapshot we apply the paired success-rate contrast to available common support. We match training seed, task, initial state, noise and execution settings within each pair. We average within each observed seed and task, then equally across represented seeds within each task, tasks within each suite, and suites. The analysis combines 1,150 on NVIDIA A100-PCIE-40GB and 750 on NVIDIA A100-SXM4-40GB and 4,100 on NVIDIA H100 PCIe. These observations cover 120 of the 120 planned seed--task combinations. All 6,000 planned primary pairs are present. The point estimate reproduces the registered complete-grid estimator. The registered interval is reported from the verified full-study analysis.",
+  "paired_difference_pp": 0.29999999999999993,
+  "support_sentence": "The matched observations span 40 tasks across 4 suites, with 2,000 from seed 17 and 2,000 from seed 42 and 2,000 from seed 93.",
+  "validated_episodes": 16000
+}

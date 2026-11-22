@@ -1,0 +1,12 @@
+\begin{table}[t]
+\centering
+\begin{tabular}{llll}
+\toprule Arm & Trunk & Output initialization & Velocity \\
+\midrule B0 & Pretrained & Pretrained & $f_\theta$ \\
+B1 & Same pretrained trunk & Zero weight and bias & $f_\theta$ \\
+P & Same initial tensors as B1 & Zero weight and bias & $\nabla_x(x^\top f_\theta)$ \\
+\bottomrule
+\end{tabular}
+\caption{Matched controls. Each research arm uses seeds 17, 42, and 93, 30,000 updates, and the same frozen-backbone numerical protocol.}
+\label{tab:design}
+\end{table}

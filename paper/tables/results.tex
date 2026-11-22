@@ -1,0 +1,26 @@
+\paragraph{Observed outcomes.} At 22 November 2026, 14:43 UTC, the retained results contained 40,000 distinct original episodes. Table~\ref{tab:observed} shows the success counts for every checkpoint and inference-step combination with reported outcomes.
+\begin{table}[htbp]\centering\begin{tabular}{lrrr}\toprule
+Checkpoint & Euler steps & Successful / observed & Phase validated \\ \midrule
+B0-seed17 & 1 & 1,841 / 2,000 & 0 \\
+B0-seed17 & 10 & 1,822 / 2,000 & 0 \\
+B0-seed42 & 1 & 1,859 / 2,000 & 2,000 \\
+B0-seed42 & 10 & 1,793 / 2,000 & 2,000 \\
+B0-seed93 & 1 & 1,847 / 2,000 & 0 \\
+B0-seed93 & 10 & 1,820 / 2,000 & 0 \\
+B1-seed17 & 1 & 1,879 / 2,000 & 0 \\
+B1-seed17 & 10 & 1,841 / 2,000 & 0 \\
+B1-seed42 & 1 & 1,856 / 2,000 & 2,000 \\
+B1-seed42 & 10 & 1,809 / 2,000 & 2,000 \\
+B1-seed93 & 1 & 1,859 / 2,000 & 0 \\
+B1-seed93 & 10 & 1,815 / 2,000 & 0 \\
+P-seed17 & 1 & 1,861 / 2,000 & 2,000 \\
+P-seed17 & 10 & 1,822 / 2,000 & 2,000 \\
+P-seed42 & 1 & 1,865 / 2,000 & 2,000 \\
+P-seed42 & 10 & 1,827 / 2,000 & 2,000 \\
+P-seed93 & 1 & 1,892 / 2,000 & 0 \\
+P-seed93 & 10 & 1,834 / 2,000 & 0 \\
+released-pi05-libero & 1 & 1,932 / 2,000 & 0 \\
+released-pi05-libero & 10 & 1,917 / 2,000 & 0 \\
+\bottomrule\end{tabular}\caption{Outcome counts across the observed hardware. The final column counts episodes in the original accepted phase archives; task validation is reported separately. The planned count is 2,000 episodes per row.}\label{tab:observed}\end{table}
+\paragraph{Paired comparison.} The observed comparison uses 6,000 matched ten-step episodes per arm. The matched observations span 40 tasks across 4 suites, with 2,000 from seed 17 and 2,000 from seed 42 and 2,000 from seed 93.
+\begin{figure}[htbp]\centering\includegraphics[width=.87\linewidth]{figures/coverage.png}\caption{Retained evaluation coverage for each checkpoint and inference-step count, with 2,000 planned episodes per bar.}\end{figure}

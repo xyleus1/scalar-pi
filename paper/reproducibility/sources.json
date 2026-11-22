@@ -1,0 +1,17 @@
+{
+  "statistics.py": {
+    "sha256": "2d1f8e1552652f7df21557fc1dfab5a226af81be6e22586fadee6dbbd8e4542a",
+    "license": "Apache-2.0",
+    "role": "Exact retained scientific source; selected functions are used without alteration."
+  },
+  "analysis_entrypoint.py": {
+    "sha256": "46a26c88b41cb0b9e9eca0a1022e03db7722914738503273335f64564c3ed79e",
+    "license": "Apache-2.0",
+    "role": "Exact retained scientific source; selected functions are used without alteration."
+  },
+  "manifest.json": {
+    "sha256": "b941a1bccdd361d85d848fd30e7af98779cf18f564fc1402d992bb12f76c0894",
+    "source_sha256": "9e2036f5f8a78258288f2bd3b6782fc5ea37d6e9fa16411f2151882a74071686",
+    "role": "Scientific fields retained; machine paths and deployment commands omitted."
+  }
+}

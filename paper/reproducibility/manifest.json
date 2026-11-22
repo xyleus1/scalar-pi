@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "diagnostic": false,
+  "study_kind": "replicated",
+  "require_provenance": true,
+  "training_seeds": [
+    17,
+    42,
+    93
+  ],
+  "suites": [
+    "libero_spatial",
+    "libero_object",
+    "libero_goal",
+    "libero_10"
+  ],
+  "num_steps": [
+    1,
+    10
+  ],
+  "num_tasks_per_suite": 10,
+  "num_trials_per_task": 50,
+  "rollout_seed": 7,
+  "paired_noise_seed": 7,
+  "save_videos": false,
+  "task_shards": true,
+  "variants": [
+    {
+      "group": "B0",
+      "training_seed": 17,
+      "checkpoint_id": "B0-seed17",
+      "config": "pi05_libero_b0"
+    },
+    {
+      "group": "B0",
+      "training_seed": 42,
+      "checkpoint_id": "B0-seed42",
+      "config": "pi05_libero_b0"
+    },
+    {
+      "group": "B0",
+      "training_seed": 93,
+      "checkpoint_id": "B0-seed93",
+      "config": "pi05_libero_b0"
+    },
+    {
+      "group": "B1",
+      "training_seed": 17,
+      "checkpoint_id": "B1-seed17",
+      "config": "pi05_libero_b1"
+    },
+    {
+      "group": "B1",
+      "training_seed": 42,
+      "checkpoint_id": "B1-seed42",
+      "config": "pi05_libero_b1"
+    },
+    {
+      "group": "B1",
+      "training_seed": 93,
+      "checkpoint_id": "B1-seed93",
+      "config": "pi05_libero_b1"
+    },
+    {
+      "group": "P",
+      "training_seed": 17,
+      "checkpoint_id": "P-seed17",
+      "config": "pi05_libero_potential"
+    },
+    {
+      "group": "P",
+      "training_seed": 42,
+      "checkpoint_id": "P-seed42",
+      "config": "pi05_libero_potential"
+    },
+    {
+      "group": "P",
+      "training_seed": 93,
+      "checkpoint_id": "P-seed93",
+      "config": "pi05_libero_potential"
+    },
+    {
+      "group": "reference",
+      "training_seed": null,
+      "checkpoint_id": "released-pi05-libero",
+      "reference": true,
+      "config": "pi05_libero"
+    }
+  ],
+  "source_manifest_sha256": "9e2036f5f8a78258288f2bd3b6782fc5ea37d6e9fa16411f2151882a74071686",
+  "kind": "public_scientific_manifest_projection_v1"
+}
