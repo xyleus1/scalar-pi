@@ -2,7 +2,7 @@
   "accepted_full_study_claimed": false,
   "analysis_status": "descriptive_only_not_hardware_qualified",
   "archive_acceptance_claimed": false,
-  "author": "Nima Kamali",
+  "author": "Nima Kamali and Mert Turna",
   "checkpoint_solver_cells": 20,
   "comparisons": [
     {
