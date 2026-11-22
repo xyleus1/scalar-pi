@@ -119,7 +119,7 @@ TrainConfig(
         repo_id="your_username/ur5_dataset",
         # This config lets us reload the UR5 normalization stats from the base model checkpoint.
         # Reloading normalization stats can help transfer pre-trained models to new environments.
-        # See the [norm_stats.md](../docs/norm_stats.md) file for more details.
+        # See the [norm_stats.md](../../docs/norm_stats.md) file for more details.
         assets=AssetsConfig(
             assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
             asset_id="ur5e",
