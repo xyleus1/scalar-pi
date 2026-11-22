@@ -1,7 +1,7 @@
 {
   "kind": "paper_figure_revision_v1",
   "version": "v0.1.3",
-  "title": "Scalar-potential action experts in pi0.5",
+  "title": "Scalar-potential action experts in π₀.₅",
   "author": "Nima Kamali and Mert Turna",
   "date": "2026-11-22",
   "pages": 20,
@@ -14,7 +14,7 @@
   "planned_studies": 5,
   "new_experiments": false,
   "new_statistical_estimates": false,
-  "source_commit": "03f4a79f3b2ec7a9025440a5d8a98c9252daed42",
+  "source_commit": "db7dc8a60d2a2ca546e2ab18e6187a01300b6f05",
   "scientific_worker_commit": "a9c0bdbf5f20356246f25ec303c51e466fa4c3a3",
   "hardware_acceptance_claimed": false,
   "data": {
@@ -29,13 +29,13 @@
   "assets": [
     {
       "path": "scalar-pi-paper.pdf",
-      "bytes": 616673,
-      "sha256": "17208363839ac9900bf236be7e8f715100dae268da2ffdb357b2f1441b55c92c"
+      "bytes": 624531,
+      "sha256": "2a028ae5531e63926aa215e6076c8d63103086313ab617ed5619fa80972ed72c"
     },
     {
       "path": "scalar-pi-source.zip",
-      "bytes": 1800319,
-      "sha256": "5138bcce9629898a8d44d9c09d6d6ff65bf367d8535b63afbf564e47ded38355"
+      "bytes": 1800472,
+      "sha256": "34d7a09ef8ee6c3df0df0ae621cc8569eaa452a375612eb43655560539564cea"
     },
     {
       "path": "scalar-pi-figures.zip",
@@ -51,6 +51,6 @@
   "checksums": {
     "path": "checksums.sha256",
     "bytes": 351,
-    "sha256": "5580763c4ed4e0c878f1eaae10770ebd2569e5d271eb01755c4cef0bd144421c"
+    "sha256": "627ff3fce57f75d0c4a460955a17b87240c6231868531003ac82a2a19cd44779"
   }
 }
