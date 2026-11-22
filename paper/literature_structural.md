@@ -1,7 +1,7 @@
 # Structural action-model evidence ledger
 
 Checked 2026-11-22. This is a primary-source audit for proposed extensions to
-**Scalar-potential action experts in pi0.5**. These are other authors' reported
+**Scalar-potential action experts in π₀.₅**. These are other authors' reported
 results, not additional Scalar-Pi experiments. Entries are not a common
 leaderboard: training, checkpoint selection, baseline architecture, camera
 conditions, and evaluation populations differ. Bibliographic authors and exact

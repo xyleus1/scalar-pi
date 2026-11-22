@@ -1,4 +1,4 @@
-# Scalar-potential action experts in pi0.5
+# Scalar-potential action experts in π₀.₅
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 

@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "Please cite this paper when using Scalar-Pi or its released results."
 type: software
-title: "Scalar-potential action experts in pi0.5"
+title: "Scalar-potential action experts in π₀.₅"
 authors:
   - family-names: Kamali
     given-names: Nima
@@ -13,7 +13,7 @@ repository-code: "https://github.com/xyleus1/scalar-pi"
 license: Apache-2.0
 preferred-citation:
   type: report
-  title: "Scalar-potential action experts in pi0.5"
+  title: "Scalar-potential action experts in π₀.₅"
   authors:
     - family-names: Kamali
       given-names: Nima

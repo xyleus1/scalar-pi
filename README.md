@@ -5,7 +5,7 @@
 
 **Nima Kamali** and **[Mert Turna](https://github.com/mmturna)** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
 
-**Paper:** [Scalar-potential action experts in pi0.5](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-paper.pdf) · [Editable source (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+**Paper:** [Scalar-potential action experts in π₀.₅](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-paper.pdf) · [Editable source (v0.1.3)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.3/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
 Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
