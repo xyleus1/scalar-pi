@@ -258,6 +258,7 @@ def test_launch_is_once_detached_bound_and_recorded(guarded, setup):
     ("region", "instance_type", "gpu_count", "rate_cents"),
     [
         ("us-southeast-1", "gpu_1x_h100_sxm5", 1, 489),
+        ("us-south-2", "gpu_8x_h100_sxm5", 8, 3672),
         ("us-southeast-1", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-3", "gpu_2x_h100_sxm5", 2, 958),
         ("us-south-2", "gpu_4x_h100_sxm5", 4, 1876),
@@ -288,8 +289,8 @@ def test_portable_launch_has_true_local_mount_before_unchanged_detached_worker(
     assert "git clone" in worker and f"git checkout --detach {guarded.WORKER_COMMIT}" in worker
     assert "SCALAR_PI_VERIFY_NORMS" not in worker
     assert f"export SCALAR_PI_EXPECTED_GPU_COUNT={gpu_count}\n" in worker
-    single_h100 = "export SCALAR_PI_EXPECTED_INSTANCE_TYPE=gpu_1x_h100_sxm5\n"
-    assert (single_h100 in worker) == (instance_type == "gpu_1x_h100_sxm5")
+    type_export = f"export SCALAR_PI_EXPECTED_INSTANCE_TYPE={instance_type}\n"
+    assert (type_export in worker) == (gpu_count in {1, 8})
     assert MASTER not in body["user_data"] and KEY not in body["user_data"]
     assert run["filesystem_id"] is None and run["filesystem_mount_point"] is None
     assert run["storage_mode"] == "replicated_local" and run["storage_persistence"] == "ephemeral"

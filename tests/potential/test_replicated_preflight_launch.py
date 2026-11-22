@@ -487,3 +487,24 @@ def test_single_sxm_watchdog_and_gpu_binding(case):
         validate(a100, 1, request["instance_type"])
     with pytest.raises(AssertionError):
         validate(h100, 1)
+
+
+def test_eight_sxm_profile_and_hardware(case):
+    config = m.read(Path(case.plan["config"]["path"]))
+    config.update(instance_type="gpu_8x_h100_sxm5", region="us-south-2", max_hourly_rate_usd=36.72)
+    case.plan["config"] = write(Path(case.plan["config"]["path"]), config)
+    write(case.plan_path, case.plan)
+    _, _, _, _, request = m.load_plan(case.plan_path, root=case.root, now=lambda: NOW)
+    assert request["instance_type"] == "gpu_8x_h100_sxm5" and request["storage_mode"] == "replicated_local"
+    with pytest.raises(ValueError):
+        m.validate_request({**request, "region": "us-southeast-1"}, NOW)
+    validate = host_gpu_validator()
+    h100 = [f"NVIDIA H100 80GB HBM3, 81559, 580.196.07, GPU-{i:036x}, 9.0" for i in range(8)]
+    a100 = [f"NVIDIA A100-SXM4-80GB, 81251, 580.196.07, GPU-{i:036x}, 8.0" for i in range(8)]
+    assert validate(h100, 8, request["instance_type"])
+    assert validate(a100, 8)
+    for rows in (a100, h100[:-1], [h100[0]] * 8):
+        with pytest.raises(AssertionError):
+            validate(rows, 8, request["instance_type"])
+    with pytest.raises(AssertionError):
+        validate(h100, 8)
