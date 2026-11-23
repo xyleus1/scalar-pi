@@ -34,7 +34,7 @@ We train two controls that use the original, direct update rule. The primary con
 
 The scalar model's observed success rate is close to its matched control, and the paired uncertainty interval includes zero. The released policy has a higher observed success rate. Differences in outputs across GPU types further limit the comparison. We retain the complete episode data and paired analysis so these results can be inspected and reproduced.
 
-The next experiments will test changes to supervision, waypoint prediction, geometric symmetry, future prediction, and the way a scalar model generates action distributions. Each will include a direct model with the same inputs and training conditions. The first adds trajectory reconstruction to both scalar and direct experts. This comparison can separate the benefit of the added supervision from any benefit of the scalar architecture.
+The next experiments will test changes to supervision, waypoint prediction, geometric symmetry, computation within the expert, and the way a scalar model generates action distributions. Each will include a direct model with the same inputs and training conditions. The first adds trajectory reconstruction to both scalar and direct experts. This comparison can separate the benefit of the added supervision from any benefit of the scalar architecture.
 
 \section{Related work}
 \paragraph{Flow policies.}
@@ -46,9 +46,10 @@ Sun et al. multiply an input by the corresponding output of a U-Net and sum the 
 Energy Matching studies a scalar function that does not depend on sampling time \cite{energymatching}. Equilibrium Matching learns dynamics whose energy need not be represented by a separate scalar network, and also tests explicit scalar versions \cite{eqm}. Scalar-Pi instead keeps the denoising-time input and original flow-matching loss. These papers establish the use of scalar functions in generative models; our experiment asks what happens when this construction is applied to the full pretrained $\pihalf$ action expert.
 
 \paragraph{Additional supervision and planning.}
-The proposed studies in Section~\ref{sec:future} draw on methods that give the action expert more information during training. Hermite-VLA adds a head that reconstructs demonstrated movements, then removes it before deployment \cite{lv2026hermite}. Fast Plans, Faithful Actions tests whether an action model follows its predicted waypoints \cite{xie2026fastplans}, while $\pi_{0.7}$ uses intermediate instructions and visual goals \cite{physicalintelligence2026pi07}. SAVLA studies whether geometric symmetries help adapt GR00T with fewer demonstrations \cite{li2026savla}. AnyCamVLA shows that training on multiple views is itself a strong way to improve performance from new camera positions \cite{heo2026anycam}.
+Several proposed studies in Section~\ref{sec:future} change what the action expert learns or how it represents the inputs. Hermite-VLA adds a head that reconstructs demonstrated movements, then removes it before deployment \cite{lv2026hermite}. Fast Plans, Faithful Actions tests whether an action model follows its predicted waypoints \cite{xie2026fastplans}, while $\pi_{0.7}$ uses intermediate instructions and visual goals \cite{physicalintelligence2026pi07}. SAVLA studies whether geometric symmetries help adapt GR00T with fewer demonstrations \cite{li2026savla}. AnyCamVLA shows that training on multiple views is itself a strong way to improve performance from new camera positions \cite{heo2026anycam}.
 
-DYNA-2 trains action and video models together, including a test of prediction on robot trajectories excluded from training \cite{dyna2}. Cosmos Policy adapts a pretrained video model for robot control \cite{cosmospolicy}. However, SaiVLA-JEPA finds no detectable overall success gain from predicting the future once the quality of current-image features is matched \cite{saivlajepa}. This makes a current-image prediction task an important control for future prediction. ESP and DriftingVLA use different training losses to generate actions in one step \cite{esp,driftingvla}; they motivate testing a new loss rather than simply taking fewer steps with the existing model.
+\paragraph{Computation inside the expert.}
+Deep Declarative Networks define neural layers by the solution of an optimization problem \cite{gould2022ddn}. Input Convex Neural Networks can constrain convexity to selected inputs \cite{icnn}, and Fixed Point Diffusion Models use an implicit hidden layer inside an image denoiser \cite{fpdm}. RD-VLA repeats a shared action head in MiniVLA, while $\pi_0$-EqM replaces $\pi_0$'s flow decoder with a time-independent field and solves for action-space equilibria \cite{rdvla,pi0eqm}. These precedents motivate a different question: whether optimizing hidden state inside a scalar $\pihalf$ expert helps under the original flow loss. The proposed study will compare this computation with ordinary feedforward and recurrent modules. ESP and DriftingVLA instead change the training loss to generate actions in one step \cite{esp,driftingvla}; they motivate our separate proposal for distributional training.
 
 \section{Method}
 
@@ -148,9 +149,8 @@ We did not save actions and robot states at every simulation step, so these reco
 \input{future-work.tex}
 
 \section{Conclusion}
-Scalar-Pi keeps the pretrained $\pihalf$ action transformer and derives its sampling updates from a learned scalar function. In this experiment, that change gives only a small observed gain over the matched direct model, with an uncertainty interval that includes zero. We trained three seeds per model, kept the image and language backbone frozen, and evaluated tasks that also appear in training. The unresolved differences between GPU outputs further limit the result. The next studies will test whether the scalar model benefits from learning movement shape, manipulation stages, geometric symmetries, or the effects of actions, and whether a different loss can support one-step generation.
+Scalar-Pi keeps the pretrained $\pihalf$ action transformer and derives its sampling updates from a learned scalar function. In this experiment, that change gives only a small observed gain over the matched direct model, with an uncertainty interval that includes zero. We trained three seeds per model, kept the image and language backbone frozen, and evaluated tasks that also appear in training. The unresolved differences between GPU outputs further limit the result. The next studies will test trajectory supervision, predicted manipulation stages, geometric symmetries, optimization of the expert's hidden state, and a different loss for one-step generation.
 
-\clearpage
 \appendix
 \section{Checkpoint outcomes}
 Table~\ref{tab:observed} lists all checkpoint counts. Each solver setting uses 40 tasks and 50 initial states per task. Complete task-level outcomes and paired arrays accompany the release.
@@ -162,7 +162,7 @@ The release includes the 40,000 selected episodes, results for every task, exclu
 
 Scientific worker: \texttt{a9c0bdbf5f20356246f25ec303c51e466fa4c3a3}.
 
-\begingroup\footnotesize\setlength{\parskip}{0pt}
+\begingroup\footnotesize\setlength{\parskip}{0pt}\setlength{\bibsep}{3pt plus 1pt minus 1pt}
 \bibliographystyle{plainnat}
 \bibliography{references}
 \endgroup

@@ -2,13 +2,14 @@
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
-[Paper PDF (v0.1.6)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-paper.pdf) · [Editable source (v0.1.6)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.6/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+[Paper PDF (v0.1.7)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-paper.pdf) · [Editable source (v0.1.7)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-The v0.1.6 revision explains the model and proposed experiments in plain technical
-English. It introduces each calculation through the problem it solves and keeps
-the equations needed to specify it. The four figures, checkpoint counts, reported
-estimates, and five proposed studies are retained. It introduces no new experiments
-or statistical estimates. The public dataset remains the immutable v0.1.1 release.
+The v0.1.7 revision replaces the future-prediction proposal with an action expert
+that optimizes a small hidden state inside its scalar potential. It adds the
+relevant architectural precedents and specifies feedforward, recurrent, and
+direct controls. The other four proposals, figures, checkpoint counts, and
+reported estimates are unchanged. No new experiments are reported. The public
+dataset remains the immutable v0.1.1 release.
 
 The completed observed grid contains 40,000 episodes, 800 task-evaluation runs, 20 checkpoint/K
 combinations and 80 checkpoint/K/suite cells. All selected tasks have retained
@@ -88,12 +89,14 @@ selected task examples. Results from other papers are discussed in the text;
 they are not plotted as a cross-paper leaderboard.
 
 The five proposals concern training-only trajectory supervision, event/waypoint
-conditioning, geometric invariance, future-feature prediction, and
-distributional action generation. None has been evaluated here. Their evidence
-and limitations are documented in the [structural-model ledger](literature_structural.md)
+conditioning, geometric invariance, hidden-state optimization, and
+distributional action generation. None has been evaluated here. Background
+sources are documented in the [structural-model ledger](literature_structural.md)
 and [distributional/predictive-supervision ledger](literature_distributional.md),
 with versioned primary references in `references_structural.bib` and
-`references_distributional.bib`. Neither being scalar nor the observed success
+`references_distributional.bib`. The hidden-state proposal cites Deep Declarative
+Networks, Input Convex Neural Networks, Fixed Point Diffusion Models, RD-VLA, and
+π₀-EqM in `references.bib`. Neither being scalar nor the observed success
 rates establish smoother motion, lower jerk, safety, or a mechanism for the
 task-level differences.
 
