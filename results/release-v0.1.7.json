@@ -1,0 +1,57 @@
+{
+  "assets": [
+    {
+      "bytes": 460270,
+      "path": "scalar-pi-paper.pdf",
+      "sha256": "7648f5cb76791857555defc440045d9d17bf90a0efd1a98e93365e6a3dc34efd"
+    },
+    {
+      "bytes": 609375,
+      "path": "scalar-pi-source.zip",
+      "sha256": "bf8fd2a37abeedcf4d76bf5e80efe9ea64474fa4eec7b997a23100d79f6c455d"
+    },
+    {
+      "bytes": 510634,
+      "path": "scalar-pi-figures.zip",
+      "sha256": "7193312449edcfb84ad18caecdffa8a3207c2799eb97b1e103d94565ef5098cf"
+    },
+    {
+      "bytes": 322,
+      "path": "data-reference.json",
+      "sha256": "5f84be9e92f46036b4d445ad00ceda344b2f63bcc6dc8a0bde64789ecbd9af90"
+    }
+  ],
+  "author": "Nima Kamali and Mert Turna",
+  "checksums": {
+    "bytes": 351,
+    "path": "checksums.sha256",
+    "sha256": "dfe2e51505f8e1445d7c2e48061c4d4710923fdf5f88f3e46a8ed351b134bb14"
+  },
+  "data": {
+    "bytes": 133911028,
+    "episode_count": 40000,
+    "path": "scalar-pi-data.zip",
+    "reused_without_changes": true,
+    "sha256": "5a533375c4aa4175bf97052a36039f917216c824a8477037b65923c98ee40454",
+    "url": "https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip",
+    "version": "v0.1.1"
+  },
+  "date": "2026-11-22",
+  "figure_formats": [
+    "pdf",
+    "svg",
+    "png"
+  ],
+  "figures": 4,
+  "hardware_acceptance_claimed": false,
+  "kind": "paper_architecture_proposal_revision_v1",
+  "new_experiments": false,
+  "new_statistical_estimates": false,
+  "pages": 11,
+  "planned_studies": 5,
+  "replaced_study": 4,
+  "scientific_worker_commit": "a9c0bdbf5f20356246f25ec303c51e466fa4c3a3",
+  "source_commit": "e10f7bedb9c351028ff348fbb530dbab769623af",
+  "title": "Scalar-potential action experts in \u03c0\u2080.\u2085",
+  "version": "v0.1.7"
+}
