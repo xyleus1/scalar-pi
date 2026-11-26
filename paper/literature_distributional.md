@@ -6,6 +6,13 @@ ArXiv versions below are explicit; repository and documentation links describe
 the retrieved implementation and must be commit-pinned before a replication.
 Bibliography keys are defined in `references_distributional.bib`.
 
+The predictive-supervision proposal and draft protocol in this ledger are
+historical. The v0.1.7 paper replaced that proposal with hidden-state
+optimization. Its planned direct/scalar comparisons also train the full model,
+including the conditioning backbone. The [future-work section](future-work.tex)
+defines the current proposals and evaluation protocol. Source findings below
+are retained as research notes, not instructions for the next experiment.
+
 ## Predictive supervision: what the comparisons establish
 
 ### DYNA-2 (`dyna2`)
@@ -245,7 +252,7 @@ The conditional-velocity framework is described in
 [Lipman et al., Flow Matching](https://arxiv.org/abs/2210.02747), already cited
 as `flowmatching` in the main bibliography.
 
-## Proposed confirmation protocol, not completed results
+## Historical draft protocol, superseded by the paper
 
 1. **Separate objectives from architecture.** Compare the existing direct and
    dot-potential velocity heads under the same flow objective. Separately

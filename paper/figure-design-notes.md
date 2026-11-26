@@ -1,13 +1,14 @@
 # Figure design study
 
-22 November 2026. Design notes for the Scalar-Pi v0.1.4 paper revision.
+22 November 2026. Historical design notes for the Scalar-Pi v0.1.3 and v0.1.4 revisions.
 
-The current paper contains four figures: the shared expert and paired readout,
+The paper retains four figures: the shared expert and paired readout,
 suite-level success, paired contrasts, and task heterogeneity. It ends with
 one compact checkpoint-count appendix and the references. The earlier
 v0.1.3 visual study and iteration observations below are retained as design
-history; the current placement decisions are stated explicitly here and in
-the v0.1.4 pass near the end.
+history. The page counts and placement records below refer to those revisions,
+not the latest paper. The v0.1.7 paper has eleven pages and retains these four
+figures. See the [paper guide](README.md) for the latest release and sources.
 
 This revision changes how the existing evidence is presented. It does not add
 experiments or alter success counts, paired intervals, evaluation identities,
@@ -163,11 +164,11 @@ the inspected figure pages. The corrected context/action inputs, interval
 labels, heatmap scale, and panel boundaries were checked visually. Grayscale
 renders of the success and task-detail figures retained distinguishable square,
 triangle, circle, and diamond identities. This is a substantial legibility
-improvement over the preceding 4.5?4.8-point effective labels, independent of
+improvement over the preceding 4.5-4.8-point effective labels, independent of
 PNG resolution.
 
 
-## Current v0.1.4 pass: density, consistency, and scope
+## Historical v0.1.4 pass: density, consistency, and scope
 
 A further user review requested denser figures and a less confusing ending.
 This pass supersedes the earlier recommendation to retain several graphics in
@@ -179,7 +180,7 @@ presents factory imagery and its company approach. No primary research-paper
 figure was found there during this review. Mind Robotics is not silently
 substituted with Google DeepMind. The latter's independently identified
 [Gemini Robotics 1.5 technical report](https://storage.googleapis.com/deepmind-media/gemini-robotics/Gemini-Robotics-1-5-Tech-Report.pdf)
-was downloaded and its pages 2, 6, 7, and 11 inspected visually. Figures 3?4
+was downloaded and its pages 2, 6, 7, and 11 inspected visually. Figures 3-4
 repeat a common chart layout across embodiments, sharing legends and model
 colors; Fig. 8 uses direct labels on a small scatter plot. Their density comes
 from aligned comparisons and short labels. We adopt those conventions without
@@ -231,12 +232,12 @@ protocol constants into one narrow footer. Its eight-point body and nine-point
 headers match the result figures. No clipping or label collision was observed.
 
 
-## Final v0.1.4 page review
+## Historical v0.1.4 page review
 
-The second compiled draft contains 14 pages. The method figure sits beside the
+The second v0.1.4 draft contained 14 pages. The method figure sat beside the
 opening method section on page 3; all four figures retain their captions and
 readable labels. The conclusion and compact checkpoint-count appendix share
-page 12, followed directly by references on pages 13?14. There are no orphan
+page 12, followed directly by references on pages 13-14. There are no orphan
 appendix headings or isolated figure pages. The tail no longer alternates
 among redundant coverage plots, unrelated literature charts, and proposed
 architecture drawings. No clipping or detached captions were observed in the

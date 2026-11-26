@@ -1,14 +1,16 @@
-# DROID Policies in openpi
+# DROID Policies in OpenPI
 
-We offer instructions for:
-- [Running inference for our best $pi_{0.5}$-DROID policy](./README.md#running-droid-inference)
-- [Running inference for other pre-trained DROID policies ($\pi_0$, $\pi_0$-FAST, ...)](./README.md#running-roboarena-baseline-policies)
+This retained OpenPI example describes DROID inference and training. It is separate
+from Scalar-Pi's LIBERO study. These instructions cover:
+
+- [Running inference for the released $\pi_{0.5}$-DROID policy](./README.md#running-droid-inference)
+- [Running inference for other pre-trained DROID policies ($\pi_0$, $\pi_0$-FAST, ...)](./README.md#running-other-policies)
 - [Pre-training *generalist* policies on the *full* DROID dataset](./README_train.md#training-on-droid)
 - [Fine-tuning expert $\pi_{0.5}$ on your custom DROID dataset](./README_train.md#fine-tuning-on-custom-droid-datasets)
 
 ## Running DROID Inference
 
-This example shows how to run the fine-tuned $\pi_{0.5}$-DROID model on the [DROID robot platform](https://github.com/droid-dataset/droid). Based on the [public RoboArena benchmark](https://robo-arena.github.io/leaderboard), this is currently our strongest generalist DROID policy. 
+This example shows how to run the fine-tuned $\pi_{0.5}$-DROID model released by OpenPI on the [DROID robot platform](https://github.com/droid-dataset/droid).
 
 
 ### Step 1: Start a policy server
@@ -28,6 +30,9 @@ You can also run the equivalent command below:
 uv run scripts/serve_policy.py --env=DROID
 ```
 
+For a client on the robot laptop, follow the [remote-serving guide](../../docs/remote_inference.md)
+to configure an SSH tunnel or the server's listening address. The server binds to localhost by default.
+
 ### Step 2: Run the DROID robot
 
 1. Make sure you have the most recent version of the DROID package installed on both the DROID control laptop and the NUC.
@@ -42,7 +47,7 @@ uv run scripts/serve_policy.py --env=DROID
 python3 scripts/main.py --remote_host=<server_ip> --remote_port=<server_port> --external_camera="left"
 ```
 
-The script will ask you to enter a free-form language instruction for the robot to follow. Make sure to point the cameras at the scene you want the robot to interact with. You _do not_ need to carefully control camera angle, object positions, etc. The policy is fairly robust in our experience. Happy prompting!
+The script will ask you to enter a free-form language instruction for the robot to follow. Make sure to point the cameras at the scene you want the robot to interact with. The upstream example reports tolerance to changes in camera angle and object positions; these claims are separate from the Scalar-Pi study.
 
 ## Troubleshooting
 
@@ -51,7 +56,7 @@ The script will ask you to enter a free-form language instruction for the robot 
 | Cannot reach policy server | Make sure the server is running and the IP and port are correct. You can check that the server machine is reachable by running `ping <server_ip>` from the DROID laptop. |
 | Cannot find cameras | Make sure the camera IDs are correct and that the cameras are connected to the DROID laptop. Sometimes replugging the cameras can help. You can check all connected cameras by running `ZED_Explore` in the command line. |
 | Policy inference is slow / inconsistent | Try using a wired internet connection for the DROID laptop to reduce latency (0.5 - 1 sec latency per chunk is normal). |
-| Policy does not perform the task well | In our experiments, the policy could perform simple table top manipulation tasks (pick-and-place) across a wide range of environments, camera positions, and lighting conditions. If the policy does not perform the task well, you can try modifying the scene or object placement to make the task easier. Also make sure that the camera view you are passing to the policy can see all relevant objects in the scene (the policy is only conditioned on a single external camera + wrist camera, make sure you are feeding the desired camera to the policy). Use `ZED_Explore` to check that the camera view you are passing to the policy can see all relevant objects in the scene. Finally, the policy is far from perfect and will fail on more complex manipulation tasks, but it usually makes a decent effort. :) |
+| Policy does not perform the task well | The upstream example reports simple table top manipulation tasks (pick-and-place) across a wide range of environments, camera positions, and lighting conditions. If the policy does not perform the task well, you can try modifying the scene or object placement to make the task easier. Also make sure that the camera view you are passing to the policy can see all relevant objects in the scene (the policy is only conditioned on a single external camera + wrist camera, make sure you are feeding the desired camera to the policy). Use `ZED_Explore` to check that the camera view you are passing to the policy can see all relevant objects in the scene. The upstream example also reports failures on more complex manipulation tasks. |
 
 
 ## Running Other Policies

@@ -4,7 +4,7 @@ There are two paths: replay the released statistics on a CPU, or rerun the model
 
 ## Replay the published results
 
-Download `scalar-pi-source.zip` and `scalar-pi-data.zip` from [v0.1.1](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.1), verify them against the release checksums, and extract them beside each other. From the extracted source directory:
+Download the [current editable source](https://github.com/xyleus1/scalar-pi/releases/latest/download/scalar-pi-source.zip) and the [unchanged v0.1.1 dataset](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip). Verify each archive against the checksums in its own release, then extract them beside each other. Paper revisions use the same dataset. From the extracted source directory:
 
 ```bash
 python paper/reproduce_descriptive.py --dataset ../data --check-only

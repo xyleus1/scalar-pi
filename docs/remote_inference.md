@@ -1,23 +1,23 @@
 
-# Running openpi models remotely
+# Remote policy serving
 
-We provide utilities for running openpi models remotely. This is useful for running inference on more powerful GPUs off-robot, and also helps keep the robot and policy environments separate (and e.g. avoid dependency hell with robot software).
+This page documents the general OpenPI policy server retained in Scalar-Pi. It lets the policy run on a separate machine from the robot. For the study's model settings and paired LIBERO evaluation, follow [Reproduction](reproduction.md).
 
 ## Starting a remote policy server
 
 To start a remote policy server, you can simply run the following command:
 
 ```bash
-uv run scripts/serve_policy.py --env=[DROID | ALOHA | LIBERO]
+uv run scripts/serve_policy.py --env=LIBERO
 ```
 
-The `env` argument specifies which $\pi_0$ checkpoint should be loaded. Under the hood, this script will execute a command like the following, which you can use to start a policy server, e.g. for checkpoints you trained yourself (here an example for the DROID environment):
+The `env` argument selects a default released checkpoint. Supported values are `DROID`, `ALOHA`, `ALOHA_SIM`, and `LIBERO`; `LIBERO` loads `pi05_libero`. You can also select a configuration and checkpoint explicitly, including a checkpoint you trained. For example, the DROID default is equivalent to:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi0_fast_droid --policy.dir=gs://openpi-assets/checkpoints/pi0_fast_droid
+uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid --policy.dir=gs://openpi-assets/checkpoints/pi05_droid
 ```
 
-This will start a policy server that will serve the policy specified by the `config` and `dir` arguments. The policy will be served on the specified port (default: 8000).
+This starts a policy server for the selected configuration and checkpoint. It binds to `127.0.0.1:8000` by default. A remote client can connect through an SSH tunnel; `--host` and `--port` set a different listening address.
 
 ## Querying the remote policy server from your robot code
 

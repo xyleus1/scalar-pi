@@ -2,14 +2,15 @@
 
 **Nima Kamali and [Mert Turna](https://github.com/mmturna)** · 22 November 2026
 
-[Paper PDF (v0.1.7)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-paper.pdf) · [Editable source (v0.1.7)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+[Latest paper PDF](https://github.com/xyleus1/scalar-pi/releases/latest/download/scalar-pi-paper.pdf) · [Editable source](https://github.com/xyleus1/scalar-pi/releases/latest/download/scalar-pi-source.zip) · [Curated data (v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-The v0.1.7 revision replaces the future-prediction proposal with an action expert
-that optimizes a small hidden state inside its scalar potential. It adds the
-relevant architectural precedents and specifies feedforward, recurrent, and
-direct controls. The other four proposals, figures, checkpoint counts, and
-reported estimates are unchanged. No new experiments are reported. The public
-dataset remains the immutable v0.1.1 release.
+The paper reports the completed experiment and five proposed follow-up studies.
+Study 4 proposes optimizing a small hidden state inside the scalar potential,
+with feedforward, recurrent, and direct controls. None of the five extensions
+has been implemented or evaluated. The public dataset remains the immutable
+v0.1.1 release. Paper and source links above follow the latest release; exact
+paper versions and checksums are recorded in `../CITATION.cff` and
+`../results/release-v*.json`.
 
 The completed observed grid contains 40,000 episodes, 800 task-evaluation runs, 20 checkpoint/K
 combinations and 80 checkpoint/K/suite cells. All selected tasks have retained

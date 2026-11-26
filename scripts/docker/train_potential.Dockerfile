@@ -1,11 +1,11 @@
 # Adapted from the official OpenPI serving image at 215abfb217dbac7d5f1273282331b9b1866c0479.
 # The lockfile's Torch wheel supplies its own CUDA runtime; the base-image name
 # does not describe torch.version.cuda. A compatible host NVIDIA driver is needed.
-# Build: docker build -f scripts/docker/train_potential.Dockerfile -t potential-pi .
+# Build: docker build -f scripts/docker/train_potential.Dockerfile -t scalar-pi-model .
 FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04@sha256:2d913b09e6be8387e1a10976933642c73c840c0b735f0bf3c28d97fc9bc422e0
 COPY --from=ghcr.io/astral-sh/uv:0.5.1 /uv /uvx /bin/
 
-LABEL org.opencontainers.image.title="Potential pi05 research environment"
+LABEL org.opencontainers.image.title="Scalar-Pi pi0.5 research environment"
 LABEL org.opencontainers.image.base.upstream="215abfb217dbac7d5f1273282331b9b1866c0479"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

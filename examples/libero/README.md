@@ -52,7 +52,7 @@ You can customize the loaded checkpoint by providing additional `SERVER_ARGS` (s
 For example:
 
 ```bash
-# To load a custom checkpoint (located in the top-level openpi/ directory):
+# To load a custom checkpoint (located in the repository root):
 export SERVER_ARGS="--env LIBERO policy:checkpoint --policy.config pi05_libero --policy.dir ./my_custom_checkpoint"
 
 # To run the libero_10 task suite:

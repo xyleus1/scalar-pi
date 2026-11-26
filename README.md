@@ -5,9 +5,9 @@
 
 **Nima Kamali** and **[Mert Turna](https://github.com/mmturna)** · 22 November 2026 · [Methods](docs/potential_pi05.md) · [Reproduction](docs/reproduction.md)
 
-**Paper:** [Scalar-potential action experts in π₀.₅](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-paper.pdf) · [Editable source (v0.1.7)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.7/scalar-pi-source.zip) · [Curated data (unchanged v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
+**Paper:** [Scalar-potential action experts in π₀.₅](https://github.com/xyleus1/scalar-pi/releases/latest/download/scalar-pi-paper.pdf) · [Editable source](https://github.com/xyleus1/scalar-pi/releases/latest/download/scalar-pi-source.zip) · [Curated data (v0.1.1)](https://github.com/xyleus1/scalar-pi/releases/download/v0.1.1/scalar-pi-data.zip)
 
-Scalar-Pi studies a scalar-potential action expert for π0.5. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
+Scalar-Pi studies a scalar-potential action expert for π₀.₅. It retains the pretrained vision-language backbone and action transformer, forms a scalar from the noisy action chunk and the transformer's output, and uses its full input gradient as the flow velocity:
 
 $$\Psi_\theta(x,t,c)=\langle x,f_\theta(x,t,c)\rangle,\qquad v_\theta=\nabla_x\Psi_\theta.$$
 
@@ -21,13 +21,13 @@ The completed experiment contains **nine training runs and 40,000 selected LIBER
 |---|---:|
 | B1: reset direct-field control | 91.08% |
 | P: scalar-potential expert | 91.38% |
-| Released π0.5 LIBERO reference | 95.85% |
+| Released π₀.₅ LIBERO reference | 95.85% |
 
 The primary P−B1 difference is **+0.30 percentage points**, with a descriptive paired 95% interval of **[−1.27, +1.75]**. This does not establish an improvement. The released policy uses a different training protocol and is a reference, not the matched control.
 
-All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [paper](https://github.com/xyleus1/scalar-pi/releases/tag/v0.1.7) for the complete comparisons and hardware breakdown.
+All 800 selected task logs passed row validation. Cross-device numerical qualification is a separate limitation: A100 PCIe did not pass the original H100 comparison, and A100 SXM remains unqualified. Mixed-device estimates are therefore descriptive. The study did not measure motion smoothness or establish a speed advantage. See the [latest paper release](https://github.com/xyleus1/scalar-pi/releases/latest) for the complete comparisons and hardware breakdown.
 
-The v0.1.7 paper replaces the future-prediction proposal with a scalar expert that optimizes a small hidden state before producing its action update. It adds architectural references and matched controls for that study. The other four proposals, figures, 40,000-record dataset, and reported statistics are unchanged. The [paper guide](paper/README.md) provides reproduction commands and the [figure design notes](paper/figure-design-notes.md).
+The paper also proposes five follow-up studies: trajectory supervision, predicted manipulation stages, geometric symmetry, hidden-state optimization, and one-step distributional generation. These extensions have not been implemented or evaluated. The [paper guide](paper/README.md) provides reproduction commands and the [figure design notes](paper/figure-design-notes.md).
 
 ## Installation
 
